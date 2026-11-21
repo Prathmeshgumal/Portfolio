@@ -1,27 +1,72 @@
 "use client";
 
-import { CheckCircle2, Loader2, MessageSquare, Send, X } from "lucide-react";
+import {
+  ArrowRight,
+  Check,
+  Loader2,
+  Mail,
+  MessageSquare,
+  Phone,
+  User,
+  X,
+} from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { usePathname } from "next/navigation";
 import { useActionState, useEffect, useRef, useState } from "react";
 import { submitInquiry, type InquiryState } from "@/app/actions/inquiry";
+import { DATA } from "@/data/resume";
 import { cn } from "@/lib/utils";
 
-const inputClass =
-  "w-full rounded-lg border border-input bg-background/60 px-3 py-1.5 text-sm placeholder:text-muted-foreground/70 transition-colors focus-visible:border-foreground/30 focus-visible:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 aria-[invalid=true]:border-destructive";
+const NOTE_LIMIT = 2000;
 
-function FieldError({ id, message }: { id: string; message?: string }) {
-  if (!message) return null;
+const fieldShell =
+  "group/field relative flex items-center rounded-xl border border-transparent bg-muted/60 transition-all focus-within:border-foreground/15 focus-within:bg-background focus-within:shadow-[0_0_0_4px] focus-within:shadow-foreground/[0.04] has-[[aria-invalid=true]]:border-destructive/60 has-[[aria-invalid=true]]:bg-destructive/[0.04]";
+
+const fieldInput =
+  "peer w-full bg-transparent py-2.5 pr-3 text-sm outline-none placeholder:text-muted-foreground/70";
+
+function FieldIcon({ icon: Icon }: { icon: typeof User }) {
   return (
-    <p id={id} className="text-[11px] text-destructive">
-      {message}
-    </p>
+    <Icon
+      aria-hidden
+      className="pointer-events-none ml-3 mr-2 size-4 shrink-0 text-muted-foreground/70 transition-colors group-focus-within/field:text-foreground"
+    />
   );
 }
 
+function FieldError({ id, message }: { id: string; message?: string }) {
+  return (
+    <AnimatePresence initial={false}>
+      {message && (
+        <motion.p
+          id={id}
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: "auto" }}
+          exit={{ opacity: 0, height: 0 }}
+          className="overflow-hidden pl-1 text-[11px] text-destructive"
+        >
+          {message}
+        </motion.p>
+      )}
+    </AnimatePresence>
+  );
+}
+
+const stagger = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.04, delayChildren: 0.05 } },
+};
+const rise = {
+  hidden: { opacity: 0, y: 6 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.25, ease: "easeOut" } },
+} as const;
+
 function InquiryForm({
+  open,
   firstFieldRef,
   onSent,
 }: {
+  open: boolean;
   firstFieldRef: React.RefObject<HTMLInputElement | null>;
   onSent: () => void;
 }) {
@@ -29,20 +74,49 @@ function InquiryForm({
     submitInquiry,
     null
   );
+  const [noteLength, setNoteLength] = useState(state?.values?.note.length ?? 0);
 
   if (state?.ok) {
     return (
-      <div className="flex flex-col items-center gap-2 px-2 py-6 text-center">
-        <CheckCircle2 className="size-9 text-green-600" aria-hidden />
-        <p className="text-sm font-medium" role="status">
-          {state.message}
-        </p>
+      <div className="flex flex-col items-center px-2 pb-2 pt-4 text-center" role="status">
+        <motion.div
+          initial={{ scale: 0.4, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ type: "spring", stiffness: 260, damping: 16 }}
+          className="relative mb-3 flex size-14 items-center justify-center rounded-full bg-emerald-500/10"
+        >
+          <motion.span
+            className="absolute inset-0 rounded-full bg-emerald-500/20"
+            initial={{ scale: 1, opacity: 0.6 }}
+            animate={{ scale: 1.6, opacity: 0 }}
+            transition={{ duration: 1.1, ease: "easeOut" }}
+          />
+          <span className="flex size-9 items-center justify-center rounded-full bg-emerald-500 text-white shadow-sm">
+            <Check className="size-5" strokeWidth={3} aria-hidden />
+          </span>
+        </motion.div>
+        <motion.p
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15 }}
+          className="text-sm font-semibold"
+        >
+          Message sent!
+        </motion.p>
+        <motion.p
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.22 }}
+          className="mt-0.5 text-xs text-muted-foreground"
+        >
+          Thanks for reaching out. I&apos;ll get back to you soon.
+        </motion.p>
         <button
           type="button"
           onClick={onSent}
-          className="mt-1 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+          className="mt-4 rounded-full border px-4 py-1.5 text-xs font-medium transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          Close
+          Done
         </button>
       </div>
     );
@@ -52,82 +126,112 @@ function InquiryForm({
   const v = state?.values;
 
   return (
-    <form action={action} className="flex flex-col gap-2.5" noValidate>
-      <div className="grid grid-cols-2 gap-2.5">
-        <div className="flex flex-col gap-1">
-          <label htmlFor="ci-name" className="sr-only">
-            Name
-          </label>
+    <motion.form
+      action={action}
+      noValidate
+      className="flex flex-col gap-2.5"
+      variants={stagger}
+      initial="hidden"
+      animate={open ? "show" : "hidden"}
+    >
+      <motion.div variants={rise} className="flex flex-col gap-1">
+        <label htmlFor="ci-name" className="sr-only">
+          Name
+        </label>
+        <div className={fieldShell}>
+          <FieldIcon icon={User} />
           <input
             ref={firstFieldRef}
             id="ci-name"
             name="name"
-            placeholder="Name"
+            placeholder="Your name"
             autoComplete="name"
             maxLength={100}
             defaultValue={v?.name}
-            className={inputClass}
+            className={fieldInput}
             aria-invalid={!!e.name}
             aria-describedby={e.name ? "ci-name-error" : undefined}
           />
-          <FieldError id="ci-name-error" message={e.name} />
         </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="ci-phone" className="sr-only">
-            Contact number (optional)
-          </label>
+        <FieldError id="ci-name-error" message={e.name} />
+      </motion.div>
+
+      <motion.div variants={rise} className="flex flex-col gap-1">
+        <label htmlFor="ci-email" className="sr-only">
+          Email
+        </label>
+        <div className={fieldShell}>
+          <FieldIcon icon={Mail} />
+          <input
+            id="ci-email"
+            name="email"
+            type="email"
+            placeholder="you@company.com"
+            autoComplete="email"
+            maxLength={200}
+            defaultValue={v?.email}
+            className={fieldInput}
+            aria-invalid={!!e.email}
+            aria-describedby={e.email ? "ci-email-error" : undefined}
+          />
+        </div>
+        <FieldError id="ci-email-error" message={e.email} />
+      </motion.div>
+
+      <motion.div variants={rise} className="flex flex-col gap-1">
+        <label htmlFor="ci-phone" className="sr-only">
+          Contact number (optional)
+        </label>
+        <div className={fieldShell}>
+          <FieldIcon icon={Phone} />
           <input
             id="ci-phone"
             name="phone"
             type="tel"
-            placeholder="Phone (optional)"
+            placeholder="Phone number"
             autoComplete="tel"
             maxLength={30}
             defaultValue={v?.phone}
-            className={inputClass}
+            className={fieldInput}
             aria-invalid={!!e.phone}
             aria-describedby={e.phone ? "ci-phone-error" : undefined}
           />
-          <FieldError id="ci-phone-error" message={e.phone} />
+          <span className="mr-3 rounded-full bg-background px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground ring-1 ring-border">
+            optional
+          </span>
         </div>
-      </div>
+        <FieldError id="ci-phone-error" message={e.phone} />
+      </motion.div>
 
-      <div className="flex flex-col gap-1">
-        <label htmlFor="ci-email" className="sr-only">
-          Email
-        </label>
-        <input
-          id="ci-email"
-          name="email"
-          type="email"
-          placeholder="Email"
-          autoComplete="email"
-          maxLength={200}
-          defaultValue={v?.email}
-          className={inputClass}
-          aria-invalid={!!e.email}
-          aria-describedby={e.email ? "ci-email-error" : undefined}
-        />
-        <FieldError id="ci-email-error" message={e.email} />
-      </div>
-
-      <div className="flex flex-col gap-1">
+      <motion.div variants={rise} className="flex flex-col gap-1">
         <label htmlFor="ci-note" className="sr-only">
-          Note
+          Message
         </label>
-        <textarea
-          id="ci-note"
-          name="note"
-          rows={3}
-          placeholder="What would you like to talk about?"
-          maxLength={2000}
-          defaultValue={v?.note}
-          className={cn(inputClass, "resize-none")}
-          aria-invalid={!!e.note}
-          aria-describedby={e.note ? "ci-note-error" : undefined}
-        />
+        <div className={cn(fieldShell, "flex-col items-stretch")}>
+          <textarea
+            id="ci-note"
+            name="note"
+            rows={3}
+            placeholder="Hi Prathmesh, I'd love to chat about…"
+            maxLength={NOTE_LIMIT}
+            defaultValue={v?.note}
+            onChange={(event) => setNoteLength(event.target.value.length)}
+            className="w-full resize-none bg-transparent px-3 pb-1 pt-2.5 text-sm outline-none placeholder:text-muted-foreground/70"
+            aria-invalid={!!e.note}
+            aria-describedby={e.note ? "ci-note-error" : undefined}
+          />
+          <span
+            aria-hidden
+            className={cn(
+              "self-end px-3 pb-1.5 text-[10px] tabular-nums text-muted-foreground/60 transition-colors",
+              noteLength > NOTE_LIMIT * 0.9 && "text-amber-600"
+            )}
+          >
+            {noteLength}/{NOTE_LIMIT}
+          </span>
+        </div>
         <FieldError id="ci-note-error" message={e.note} />
-      </div>
+      </motion.div>
 
       {/* Honeypot for bots: hidden from people and screen readers. */}
       <div hidden>
@@ -136,34 +240,50 @@ function InquiryForm({
       </div>
 
       {state && !state.ok && !state.errors && (
-        <p role="alert" className="text-xs text-destructive">
+        <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
           {state.message}
         </p>
       )}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="mt-0.5 inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-primary text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60"
-      >
-        {pending ? (
-          <>
-            <Loader2 className="size-4 animate-spin" aria-hidden />
-            Sending…
-          </>
-        ) : (
-          <>
-            Submit
-            <Send className="size-3.5" aria-hidden />
-          </>
-        )}
-      </button>
-    </form>
+      <motion.div variants={rise}>
+        <button
+          type="submit"
+          disabled={pending}
+          className="group/send relative mt-1 inline-flex h-10 w-full items-center justify-center gap-2 overflow-hidden rounded-xl bg-primary text-sm font-medium text-primary-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_1px_2px_rgba(0,0,0,0.2)] transition-all hover:bg-primary/90 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-70"
+        >
+          {pending ? (
+            <>
+              <Loader2 className="size-4 animate-spin" aria-hidden />
+              Sending…
+            </>
+          ) : (
+            <>
+              Send message
+              <ArrowRight
+                className="size-4 transition-transform duration-200 group-hover/send:translate-x-0.5"
+                aria-hidden
+              />
+            </>
+          )}
+        </button>
+      </motion.div>
+
+      <motion.p variants={rise} className="text-center text-[11px] text-muted-foreground">
+        or email me at{" "}
+        <a
+          href={`mailto:${DATA.contact.email}`}
+          className="font-medium text-foreground underline-offset-4 hover:underline"
+        >
+          {DATA.contact.email}
+        </a>
+      </motion.p>
+    </motion.form>
   );
 }
 
 export default function ContactWidget() {
   const pathname = usePathname();
+  const reduceMotion = useReducedMotion();
   const [open, setOpen] = useState(false);
   // Bumped after a successful send, so the next message starts with an empty form.
   const [formKey, setFormKey] = useState(0);
@@ -190,71 +310,115 @@ export default function ContactWidget() {
 
   if (pathname?.startsWith("/admin")) return null;
 
+  const spring = reduceMotion
+    ? { duration: 0 }
+    : { type: "spring" as const, stiffness: 380, damping: 30 };
+
   return (
     <div className="fixed bottom-24 left-4 z-40 flex flex-col items-start gap-3 sm:bottom-6 sm:left-6">
       {/* The panel stays mounted while closed, so half-typed text isn't lost. */}
-      <section
+      <motion.section
         id="contact-widget"
         role="dialog"
         aria-modal="false"
         aria-labelledby="contact-widget-title"
         inert={!open}
-        className={cn(
-          "w-[min(20rem,calc(100vw-2rem))] origin-bottom-left rounded-2xl border bg-card/95 p-4 shadow-[0_8px_30px_-6px_rgba(0,0,0,0.18)] backdrop-blur-xl transition-all duration-200 ease-out dark:shadow-[0_8px_30px_-6px_rgba(0,0,0,0.6)]",
+        initial={false}
+        animate={
           open
-            ? "pointer-events-auto translate-y-0 scale-100 opacity-100"
-            : "pointer-events-none translate-y-2 scale-95 opacity-0"
+            ? { opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }
+            : { opacity: 0, y: 12, scale: 0.94, filter: "blur(4px)" }
+        }
+        transition={spring}
+        style={{ transformOrigin: "bottom left" }}
+        className={cn(
+          "relative w-[min(21rem,calc(100vw-2rem))] overflow-hidden rounded-3xl border bg-card shadow-[0_24px_60px_-12px_rgba(0,0,0,0.25),0_0_0_1px_rgba(0,0,0,0.02)] dark:shadow-[0_24px_60px_-12px_rgba(0,0,0,0.7)]",
+          !open && "pointer-events-none"
         )}
       >
-        <div className="mb-3 flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <span className="relative flex size-2">
-              <span className="absolute inline-flex size-full animate-ping rounded-full bg-green-500 opacity-60" />
-              <span className="relative inline-flex size-2 rounded-full bg-green-500" />
+        {/* Soft colour wash behind the header. */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-[radial-gradient(120%_100%_at_0%_0%,rgba(99,102,241,0.14),transparent_60%),radial-gradient(100%_100%_at_100%_0%,rgba(16,185,129,0.12),transparent_55%)]"
+        />
+
+        <div className="relative flex items-center gap-3 px-5 pb-4 pt-5">
+          <div className="relative shrink-0">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={DATA.avatarUrl}
+              alt=""
+              className="size-11 rounded-full object-cover ring-2 ring-background shadow-sm"
+            />
+            <span className="absolute -bottom-0.5 -right-0.5 flex size-3.5 items-center justify-center rounded-full bg-background">
+              <span className="absolute size-2.5 animate-ping rounded-full bg-emerald-500/60" />
+              <span className="relative size-2.5 rounded-full bg-emerald-500" />
             </span>
-            <div>
-              <h2 id="contact-widget-title" className="text-sm font-semibold leading-tight">
-                Get in touch
-              </h2>
-              <p className="text-xs text-muted-foreground">I usually reply within a day.</p>
-            </div>
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 id="contact-widget-title" className="text-sm font-semibold leading-tight">
+              Let&apos;s talk 👋
+            </h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Usually replies within a day
+            </p>
           </div>
           <button
             type="button"
             onClick={close}
             aria-label="Close"
-            className="-m-1 rounded-full p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="-mr-1.5 self-start rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <X className="size-4" />
           </button>
         </div>
-        <InquiryForm
-          key={formKey}
-          firstFieldRef={firstFieldRef}
-          onSent={() => {
-            close();
-            setFormKey((k) => k + 1);
-          }}
-        />
-      </section>
 
-      <button
+        <div className="relative px-5 pb-5">
+          <InquiryForm
+            key={formKey}
+            open={open}
+            firstFieldRef={firstFieldRef}
+            onSent={() => {
+              close();
+              setFormKey((k) => k + 1);
+            }}
+          />
+        </div>
+      </motion.section>
+
+      <motion.button
         ref={triggerRef}
         type="button"
         onClick={() => (open ? close() : setOpen(true))}
         aria-expanded={open}
         aria-controls="contact-widget"
-        className="group flex h-11 items-center gap-2 rounded-full border bg-card/90 pl-3 pr-4 text-sm font-medium shadow-[0_4px_20px_-4px_rgba(0,0,0,0.15)] backdrop-blur-xl transition-all hover:-translate-y-0.5 hover:shadow-[0_8px_24px_-4px_rgba(0,0,0,0.2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        whileHover={reduceMotion ? undefined : { y: -2 }}
+        whileTap={reduceMotion ? undefined : { scale: 0.96 }}
+        className="group flex h-12 items-center gap-2.5 rounded-full border bg-card/90 py-1.5 pl-1.5 pr-5 text-sm font-medium shadow-[0_8px_24px_-6px_rgba(0,0,0,0.18)] backdrop-blur-xl transition-shadow hover:shadow-[0_12px_28px_-6px_rgba(0,0,0,0.24)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       >
-        <span className="flex size-7 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform group-hover:scale-105">
-          {open ? (
-            <X className="size-3.5" aria-hidden />
-          ) : (
-            <MessageSquare className="size-3.5" aria-hidden />
+        <span className="relative flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground">
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.span
+              key={open ? "close" : "open"}
+              initial={{ rotate: -90, opacity: 0, scale: 0.6 }}
+              animate={{ rotate: 0, opacity: 1, scale: 1 }}
+              exit={{ rotate: 90, opacity: 0, scale: 0.6 }}
+              transition={{ duration: 0.18 }}
+              className="flex"
+            >
+              {open ? (
+                <X className="size-4" aria-hidden />
+              ) : (
+                <MessageSquare className="size-4" aria-hidden />
+              )}
+            </motion.span>
+          </AnimatePresence>
+          {!open && (
+            <span className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full bg-emerald-500 ring-2 ring-card" />
           )}
         </span>
         {open ? "Close" : "Get in touch"}
-      </button>
+      </motion.button>
     </div>
   );
 }
