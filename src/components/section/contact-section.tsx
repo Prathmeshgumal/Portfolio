@@ -1,6 +1,11 @@
+import { ArrowRight, MessageSquare } from "lucide-react";
 import Link from "next/link";
 import { FlickeringGrid } from "@/components/magicui/flickering-grid";
+import OpenContactButton from "@/components/open-contact-button";
 import { DATA } from "@/data/resume";
+
+const linkStyle =
+  "text-blue-500 hover:underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm";
 
 export default function ContactSection() {
   return (
@@ -25,23 +30,26 @@ export default function ContactSection() {
         </h2>
         <p className="mx-auto max-w-lg text-muted-foreground text-balance">
           Want to chat about a role or a project?{" "}
-          <Link
-            href={`mailto:${DATA.contact.email}`}
-            className="text-blue-500 hover:underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
-          >
-            Send me an email
-          </Link>{" "}
+          <OpenContactButton className={linkStyle}>Send me a message</OpenContactButton>{" "}
           or reach out on{" "}
           <Link
             href={DATA.contact.social.LinkedIn.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-blue-500 hover:underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-sm"
+            className={linkStyle}
           >
             LinkedIn
           </Link>
           .
         </p>
+        <OpenContactButton className="group mt-2 inline-flex h-11 items-center gap-2 rounded-full bg-primary pl-5 pr-4 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+          <MessageSquare className="size-4" aria-hidden />
+          Get in touch
+          <ArrowRight
+            className="size-4 transition-transform group-hover:translate-x-0.5"
+            aria-hidden
+          />
+        </OpenContactButton>
       </div>
     </div>
   );

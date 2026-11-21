@@ -19,6 +19,13 @@ import { cn } from "@/lib/utils";
 
 const NOTE_LIMIT = 2000;
 
+/** Dispatch this on `window` to open the contact widget from anywhere. */
+export const OPEN_CONTACT_EVENT = "open-contact-widget";
+
+export function openContactWidget() {
+  window.dispatchEvent(new Event(OPEN_CONTACT_EVENT));
+}
+
 const fieldShell =
   "group/field relative flex items-center rounded-xl border border-transparent bg-muted/60 transition-all focus-within:border-foreground/15 focus-within:bg-background focus-within:shadow-[0_0_0_4px] focus-within:shadow-foreground/[0.04] has-[[aria-invalid=true]]:border-destructive/60 has-[[aria-invalid=true]]:bg-destructive/[0.04]";
 
@@ -307,6 +314,13 @@ export default function ContactWidget() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
+
+  // Lets other parts of the page (like the "Get in Touch" section) open the widget.
+  useEffect(() => {
+    const onOpen = () => setOpen(true);
+    window.addEventListener(OPEN_CONTACT_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_CONTACT_EVENT, onOpen);
+  }, []);
 
   if (pathname?.startsWith("/admin")) return null;
 
