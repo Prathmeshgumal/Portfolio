@@ -10,9 +10,10 @@ import { useEffect, useRef } from "react";
  * the avatar, project cards and the contact card (anything marked with
  * `data-byte-perch`), says the line in `data-byte-say` when it arrives,
  * walks along the top edge, types, reads, peeks over the edge and plants
- * little flags. It hops between nearby spots, floats down with an umbrella
- * when its spot scrolls away, runs to a project card the visitor hovers,
- * and can be picked up and thrown. Clicking it makes it wave.
+ * little flags. It hops between nearby spots, floats down with an umbrella,
+ * a parachute or a propeller cap when its spot scrolls away, runs to a
+ * project card the visitor hovers, and can be picked up and thrown.
+ * Clicking it makes it wave.
  *
  * For visitors who prefer reduced motion it stays in the corner and only
  * does small in-place moves. Hidden on small screens and on /admin.
@@ -23,7 +24,7 @@ import { useEffect, useRef } from "react";
 const PX = 5; // screen pixels per sprite pixel
 const COLS = 16;
 const ROWS = 22;
-const TOP = 6; // sprite rows start here, leaving headroom for the umbrella
+const TOP = 6; // sprite rows start here, leaving headroom above the head
 const CW = COLS * PX;
 const CH = ROWS * PX;
 const FEET = (TOP + 13) * PX; // y inside the canvas where the feet touch the ground
@@ -38,15 +39,19 @@ const C = {
   eyeDim: "#bae6fd",
   metal: "#9ca3af",
   hook: "#4b5563",
-  umbrella: "#14b8a6",
-  umbrellaLight: "#5eead4",
+  red: "#ef4444",
+  cream: "#fff1f0",
+  yellow: "#fde68a",
+  capBlue: "#3b82f6",
+  capYellow: "#facc15",
+  rotor: "#94a3b8",
   book: "#60a5fa",
   bookSpine: "#1d4ed8",
 };
 
 type Pose =
   | "walk" | "stand" | "look" | "type" | "read" | "sleep" | "sit"
-  | "climb" | "dangle" | "fall" | "umbrella" | "point" | "hold";
+  | "climb" | "dangle" | "fall" | "umbrella" | "hang" | "flap" | "point" | "hold";
 
 type Look = { dir: 1 | -1; frame: 0 | 1; blink: boolean; ear: boolean; lookOff: number; wave: number };
 
@@ -66,12 +71,6 @@ function drawByte(ctx: CanvasRenderingContext2D, pose: Pose, d: Look) {
   const sitting = pose === "type" || pose === "sleep" || pose === "read" || pose === "sit";
   const oy = sitting ? 2 : 0;
   const surprised = pose === "dangle" || pose === "fall" || pose === "hold";
-
-  if (pose === "umbrella") {
-    p(11, -6, 4, 1, C.umbrellaLight);
-    p(10, -5, 6, 1, C.umbrella);
-    p(14, -4, 1, 9, C.metal);
-  }
 
   // Ears, body, visor
   p(4, 1 + oy - (d.ear ? 1 : 0), 2, 2, O);
@@ -159,9 +158,21 @@ function drawByte(ctx: CanvasRenderingContext2D, pose: Pose, d: Look) {
       p(13, 1, 1, 3, O);
       standLegs();
       break;
-    case "umbrella":
+    case "umbrella": // one hand up on the umbrella handle
       p(2, 7, 1, 2, O);
-      p(13, 4, 1, 2, O);
+      p(13, 3, 1, 3, O);
+      p(5, 11, 2, 3, K);
+      p(10, 11, 2, 3, K);
+      break;
+    case "hang": // both hands up on the parachute lines
+      p(2, 1, 1, 3, O);
+      p(13, 1, 1, 3, O);
+      p(5, 11, 2, 3, K);
+      p(10, 11, 2, 3, K);
+      break;
+    case "flap": // arms out, flapping under the propeller
+      p(1, 5 + (d.frame ? 0 : 2), 2, 1, O);
+      p(13, 5 + (d.frame ? 0 : 2), 2, 1, O);
       p(5, 11, 2, 3, K);
       p(10, 11, 2, 3, K);
       break;
@@ -184,6 +195,110 @@ function drawByte(ctx: CanvasRenderingContext2D, pose: Pose, d: Look) {
     }
   }
   ctx.restore();
+}
+
+// ---------- Landing gear ----------
+// Byte comes down with one of three, picked at random each time.
+
+type Gear = "umbrella" | "parachute" | "propeller";
+const GEARS: Gear[] = ["umbrella", "parachute", "propeller"];
+
+// The gear canvas reaches 8 sprite columns left of Byte and 28 rows above it.
+const GEAR_LEFT = 8;
+const GEAR_UP = 28;
+const GW = 32 * PX;
+const GH = (GEAR_UP + 14) * PX;
+
+const GEAR_INFO: Record<Gear, {
+  fallSpeed: number; // px/s
+  pivot: [number, number]; // sprite col/row the whole thing sways around
+  sway: (t: number) => number; // radians
+  drift: (t: number) => number; // sideways speed, px/s
+  bob?: (t: number) => number;
+  landTime: number; // seconds the landing animation lasts
+}> = {
+  umbrella: {
+    fallSpeed: 70, pivot: [13, -6], landTime: 0.9,
+    sway: (t) => Math.sin(t * 1.8) * 0.16, drift: (t) => Math.cos(t * 0.9) * 24,
+  },
+  parachute: {
+    fallSpeed: 62, pivot: [8, -20], landTime: 1.1,
+    sway: (t) => Math.sin(t * 1.4) * 0.22, drift: (t) => Math.cos(t * 0.7) * 16,
+  },
+  propeller: {
+    fallSpeed: 58, pivot: [8, 6], landTime: 1.4,
+    sway: (t) => Math.sin(t * 3) * 0.06, drift: (t) => Math.cos(t * 1.1) * 20,
+    bob: (t) => Math.sin(t * 6) * 4,
+  },
+};
+
+const easeOut = (t: number) => 1 - (1 - t) * (1 - t);
+
+/** Draw the gear. `land` is 0 while falling, then counts up in seconds after landing. */
+function drawGear(ctx: CanvasRenderingContext2D, gear: Gear, land: number, rotor: number) {
+  ctx.clearRect(0, 0, GW, GH);
+  const ox = GEAR_LEFT * PX;
+  const oy = GEAR_UP * PX;
+  const p = (x: number, y: number, w: number, h: number, c: string) => {
+    ctx.fillStyle = c;
+    ctx.fillRect(ox + x * PX, oy + y * PX, w * PX, h * PX);
+  };
+
+  if (gear === "umbrella") {
+    const close = easeOut(Math.min(1, land / 0.6));
+    p(13, -8, 1, 11, C.hook); // shaft down to the hand
+    const half = 11 * (1 - close * 0.82);
+    const rows: [number, number][] = [[-14, 0.25], [-13, 0.55], [-12, 0.78], [-11, 0.92], [-10, 1]];
+    rows.forEach(([y, w], i) => {
+      const hw = Math.max(1, Math.round(half * w));
+      for (let x = -hw; x < hw; x++) {
+        const panel = Math.floor((x + 11) / 4) % 2;
+        p(13 + x, y + Math.round(close * i * 0.9), 1, 1, panel ? C.cream : C.red);
+      }
+    });
+    p(13, -15, 1, 1, C.hook); // tip
+    if (close < 0.5) for (let x = -Math.round(half); x < Math.round(half); x += 4) p(14 + x, -9, 2, 1, C.red);
+    return;
+  }
+
+  if (gear === "parachute") {
+    const c = easeOut(Math.min(1, land / 0.9));
+    ctx.globalAlpha = 1 - c * 0.9;
+    const drop = c * 22;
+    const squash = 1 - c * 0.65;
+    const rows: [number, number][] = [[-26, 5], [-25, 9], [-24, 12], [-23, 13], [-22, 14], [-21, 14]];
+    rows.forEach(([y, hw]) => {
+      const w = Math.round(hw * (1 + c * 0.3));
+      for (let x = -w; x < w; x++) {
+        const stripe = Math.floor((x + 14) / 4) % 2;
+        p(8 + x, Math.round(-21 + (y + 21) * squash + drop), 1, 1, stripe ? C.yellow : C.body);
+      }
+    });
+    if (c < 0.4) {
+      // Lines from the canopy edge down to Byte's raised hands.
+      ctx.strokeStyle = C.hook;
+      ctx.lineWidth = 1.5;
+      const hands = [[2.5, 1], [13.5, 1]];
+      [[-6, -20], [3, -20], [13, -20], [22, -20]].forEach(([x, y], i) => {
+        const h = hands[i < 2 ? 0 : 1];
+        ctx.beginPath();
+        ctx.moveTo(ox + x * PX, oy + (y + drop) * PX);
+        ctx.lineTo(ox + h[0] * PX, oy + h[1] * PX);
+        ctx.stroke();
+      });
+    }
+    ctx.globalAlpha = 1;
+    return;
+  }
+
+  // Propeller cap: striped beanie with a spinning rotor on a stalk.
+  p(4, 0, 8, 1, C.capBlue);
+  p(5, -1, 6, 1, C.capYellow);
+  p(6, -2, 4, 1, C.red);
+  p(8, -4, 1, 2, C.hook);
+  const w = Math.round(Math.abs(Math.cos(rotor)) * 7);
+  p(8 - w, -5, w * 2 + 1, 1, C.rotor);
+  p(8, -5, 1, 1, C.red);
 }
 
 // ---------- Behaviour ----------
@@ -214,6 +329,7 @@ export default function ByteBuddy() {
   const bubbleRef = useRef<HTMLDivElement>(null);
   const zzRef = useRef<HTMLDivElement>(null);
   const ropeRef = useRef<HTMLDivElement>(null);
+  const gearRef = useRef<HTMLCanvasElement>(null);
   const ropePathRef = useRef<SVGPathElement>(null);
   const ropeStripeRef = useRef<SVGPathElement>(null);
 
@@ -226,6 +342,9 @@ export default function ByteBuddy() {
     const bubble = bubbleRef.current;
     const zz = zzRef.current;
     const ctx = canvas?.getContext("2d");
+    const gearCanvas = gearRef.current;
+    const gctx = gearCanvas?.getContext("2d");
+    if (!gearCanvas || !gctx) return;
     if (!fixedLayer || !absLayer || !actor || !canvas || !bubble || !zz || !ctx || !ropeRef.current) return;
 
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -237,7 +356,11 @@ export default function ByteBuddy() {
       feet: window.innerHeight - 16,
       vx: 0,
       vy: 0,
-      umbrella: false,
+      gear: null as Gear | null, // what Byte is floating down with, if anything
+      lastGear: null as Gear | null,
+      gearT: 0,
+      gearLand: 0, // 0 while falling; counts up after landing while the gear packs away
+      rotor: 0,
       dir: 1 as 1 | -1,
       frame: 0 as 0 | 1,
       frameT: 0,
@@ -285,6 +408,7 @@ export default function ByteBuddy() {
     const saidAt = new WeakMap<Element, number>();
     const flagged = new WeakSet<Element>();
     let lastActivity = performance.now();
+    let gearDrawn = false;
     let fastScrollUntil = 0;
     let lastWhoa = 0;
     let lastNearWave = 0;
@@ -337,6 +461,18 @@ export default function ByteBuddy() {
       setTimeout(() => flag.remove(), 19_200);
     }
 
+    function startGear() {
+      const options = GEARS.filter((g) => g !== s.lastGear);
+      s.gear = pick(options);
+      s.lastGear = s.gear;
+      s.gearT = 0;
+      s.gearLand = 0;
+    }
+    // Landed: let the gear play its landing animation, then put it away.
+    function touchDown() {
+      if (s.gear && s.gearLand === 0) s.gearLand = 0.0001;
+    }
+
     function land(el: HTMLElement, r: DOMRect) {
       s.where = "perch";
       s.perch = el;
@@ -344,7 +480,7 @@ export default function ByteBuddy() {
       s.perchT = 0;
       s.stay = rand(9, 15);
       s.vx = s.vy = 0;
-      s.umbrella = false;
+      touchDown();
       if (s.goal === el) s.goal = null;
       const line = el.dataset.byteSay;
       const last = saidAt.get(el) ?? -Infinity;
@@ -365,7 +501,7 @@ export default function ByteBuddy() {
       s.vy = (dy - 0.5 * GRAVITY * T * T) / T;
       s.dir = s.vx >= 0 ? 1 : -1;
       s.where = "air";
-      s.umbrella = false;
+      s.gear = null;
     }
 
     function leavePerch() {
@@ -472,6 +608,7 @@ export default function ByteBuddy() {
       if (!drag.dragging && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 6 && !reduceMotion.matches) {
         drag.dragging = true;
         s.where = "drag";
+        s.gear = null;
         s.perch = null;
         s.goal = null;
         setAct("idle", 1);
@@ -564,12 +701,12 @@ export default function ByteBuddy() {
       const r = el.getBoundingClientRect();
       s.x = r.left + s.perchDx;
       s.feet = r.top;
-      if (r.top < 14) {
-        // Spot scrolled off the top: float down with the umbrella.
+      if (r.top < 70) {
+        // Spot scrolled off the top: float down with an umbrella, parachute or propeller cap.
         s.perch = null;
         s.where = "air";
-        s.umbrella = true;
-        s.vx = rand(-30, 30);
+        startGear();
+        s.vx = 0;
         s.vy = 0;
         return;
       }
@@ -642,18 +779,22 @@ export default function ByteBuddy() {
 
     function updateAir(dt: number) {
       s.vy += GRAVITY * dt;
-      if (s.umbrella) s.vy = Math.min(s.vy, 75);
+      const gear = s.gear && s.gearLand === 0 ? GEAR_INFO[s.gear] : null;
+      if (gear) {
+        s.vy = Math.min(s.vy, gear.fallSpeed);
+        s.vx = gear.drift(s.gearT);
+      }
       const prevFeet = s.feet;
       s.x += s.vx * dt;
       s.feet += s.vy * dt;
       if (s.x < 0) { s.x = 0; s.vx = -s.vx * 0.5; }
       if (s.x > window.innerWidth - CW) { s.x = window.innerWidth - CW; s.vx = -s.vx * 0.5; }
-      if (Math.abs(s.vx) > 5) s.dir = s.vx > 0 ? 1 : -1;
+      if (Math.abs(s.vx) > 5 && !gear) s.dir = s.vx > 0 ? 1 : -1;
       if (s.vy > 0) {
         const cx = s.x + CW / 2;
         for (const el of perches()) {
           const r = el.getBoundingClientRect();
-          if (r.width < 40 || r.top < 40 || r.top > floorY() - 30) continue;
+          if (r.width < 40 || r.top < 80 || r.top > floorY() - 30) continue;
           if (prevFeet <= r.top + 2 && s.feet >= r.top && cx >= r.left - 10 && cx <= r.right + 10) {
             s.x = clamp(s.x, r.left - 12, r.right - CW + 12);
             land(el, r);
@@ -667,7 +808,7 @@ export default function ByteBuddy() {
         s.where = "floor";
         s.floorT = 0;
         s.vx = s.vy = 0;
-        s.umbrella = false;
+        touchDown();
         setAct("look", 1);
         if (hard) say("oof", 900);
       }
@@ -707,7 +848,9 @@ export default function ByteBuddy() {
 
     function poseFor(now: number): Pose {
       if (s.where === "drag") return "dangle";
-      if (s.where === "air") return s.umbrella ? "umbrella" : s.vy < -150 ? "climb" : "fall";
+      if (s.where === "air" && s.gear) return s.gear === "umbrella" ? "umbrella" : s.gear === "parachute" ? "hang" : "flap";
+      if (s.where === "air") return s.vy < -150 ? "climb" : "fall";
+      if (s.gear === "umbrella" && s.gearLand < 0.6) return "umbrella";
       if (s.where === "climb") return rope.mode === "throw" ? "hold" : "climb";
       if (s.where === "perch" && now < fastScrollUntil) return "hold";
       switch (s.act) {
@@ -781,7 +924,35 @@ export default function ByteBuddy() {
         swingX = ropeSway(handY);
         tilt = (Math.atan2(ropeSway(handY + 6) - ropeSway(handY - 6), 12) * 180) / Math.PI;
       }
-      actor!.style.transform = `translate(${Math.round(x + swingX)}px, ${Math.round(y)}px) rotate(${(-tilt).toFixed(1)}deg)`;
+      let origin = `${CW / 2}px ${HAND_Y}px`;
+      if (!s.gear && gearDrawn) {
+        gctx!.clearRect(0, 0, GW, GH);
+        gearDrawn = false;
+      }
+      let bobY = 0;
+      if (s.gear) {
+        const info = GEAR_INFO[s.gear];
+        const falling = s.gearLand === 0;
+        const calm = falling ? 1 : Math.max(0, 1 - s.gearLand / 0.5);
+        s.gearT += dt;
+        if (!falling) s.gearLand += dt;
+        const spin = falling ? 1 : Math.max(0, 1 - s.gearLand / info.landTime);
+        s.rotor += spin * 0.55;
+        tilt = (-info.sway(s.gearT) * calm * 180) / Math.PI;
+        if (falling && info.bob) bobY = info.bob(s.gearT);
+        // The sprite is mirrored when facing left, so mirror the pivot too.
+        const col = s.dir < 0 ? COLS - info.pivot[0] : info.pivot[0];
+        origin = `${col * PX}px ${(TOP + info.pivot[1]) * PX}px`;
+        gearCanvas!.style.transform = s.dir < 0 ? "scaleX(-1)" : "";
+        drawGear(gctx!, s.gear, s.gearLand, s.rotor);
+        gearDrawn = true;
+        if (!falling && s.gearLand > info.landTime) {
+          s.gear = null;
+          gctx!.clearRect(0, 0, GW, GH);
+        }
+      }
+      actor!.style.transformOrigin = origin;
+      actor!.style.transform = `translate(${Math.round(x + swingX)}px, ${Math.round(y + bobY)}px) rotate(${(-tilt).toFixed(1)}deg)`;
 
       if (now > s.bubbleUntil) bubble!.style.opacity = "0";
       if (pose === "sleep") {
@@ -941,7 +1112,7 @@ export default function ByteBuddy() {
         <div
           ref={actorRef}
           className="absolute left-0 top-0"
-          style={{ width: CW, height: CH, transformOrigin: `${CW / 2}px ${HAND_Y}px` }}
+          style={{ width: CW, height: CH }}
         >
           <div
             ref={bubbleRef}
@@ -955,6 +1126,13 @@ export default function ByteBuddy() {
           >
             z
           </div>
+          <canvas
+            ref={gearRef}
+            width={GW}
+            height={GH}
+            className="pointer-events-none absolute [image-rendering:pixelated]"
+            style={{ left: -GEAR_LEFT * PX, top: (TOP - GEAR_UP) * PX, transformOrigin: `${GEAR_LEFT * PX + CW / 2}px 0` }}
+          />
           <canvas
             ref={canvasRef}
             width={CW}
