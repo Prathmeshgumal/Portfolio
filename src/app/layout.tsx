@@ -4,21 +4,25 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { DATA } from "@/data/resume";
 import { cn } from "@/lib/utils";
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { FlickeringGrid } from "@/components/magicui/flickering-grid";
 import ContactWidget from "@/components/contact-widget";
 
-const geist = Geist({
-  subsets: ["latin"],
+// Geist is bundled with the project (SIL Open Font License, see ./fonts/OFL.txt)
+// instead of being fetched from Google Fonts during the build.
+const geist = localFont({
+  src: "./fonts/Geist-Variable.woff2",
   variable: "--font-sans",
-  weight: ["400", "500", "600", "700"],
+  weight: "100 900",
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
+const geistMono = localFont({
+  src: "./fonts/GeistMono-Variable.woff2",
   variable: "--font-mono",
+  weight: "100 900",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
