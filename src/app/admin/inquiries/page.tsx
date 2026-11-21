@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Mail, Phone, Trash2 } from "lucide-react";
 import { deleteInquiry, logout } from "@/app/actions/admin";
 import { Button } from "@/components/ui/button";
-import { sql, type Inquiry } from "@/lib/db";
+import { db, type Inquiry } from "@/lib/db";
 import { requireAdmin } from "@/lib/session";
 
 export const metadata: Metadata = {
@@ -19,7 +19,7 @@ const dateFormat = new Intl.DateTimeFormat("en-IN", {
 export default async function InquiriesPage() {
   await requireAdmin();
 
-  const inquiries = await sql<Inquiry[]>`
+  const inquiries = await db()<Inquiry[]>`
     SELECT id, name, email, phone, note, created_at
     FROM inquiries
     ORDER BY created_at DESC

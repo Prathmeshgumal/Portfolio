@@ -14,8 +14,14 @@ function createClient() {
   return postgres(url, { max: 1, prepare: false, idle_timeout: 20 });
 }
 
-export const sql = globalThis.__sql ?? createClient();
-if (process.env.NODE_ENV !== "production") globalThis.__sql = sql;
+/**
+ * Returns the database client, creating it on first use.
+ * Connecting lazily means `next build` never needs DATABASE_URL.
+ */
+export function db() {
+  globalThis.__sql ??= createClient();
+  return globalThis.__sql;
+}
 
 export type Inquiry = {
   id: string;

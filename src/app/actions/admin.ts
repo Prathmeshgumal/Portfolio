@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 import { timingSafeEqual } from "node:crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { sql } from "@/lib/db";
+import { db } from "@/lib/db";
 import { getIpHash } from "@/lib/request";
 import { createSession, deleteSession, requireAdmin } from "@/lib/session";
 
@@ -33,7 +33,7 @@ export async function login(
   }
 
   const ipHash = await getIpHash();
-  const [{ count }] = await sql<{ count: number }[]>`
+  const [{ count }] = await db()<{ count: number }[]>`
     SELECT count(*)::int AS count FROM login_attempts
     WHERE ip_hash = ${ipHash}
       AND created_at > now() - make_interval(mins => ${LOCKOUT_MINUTES})
@@ -50,11 +50,11 @@ export async function login(
   const userOk = sameString(username, expectedUser);
 
   if (!passwordOk || !userOk) {
-    await sql`INSERT INTO login_attempts (ip_hash) VALUES (${ipHash})`;
+    await db()`INSERT INTO login_attempts (ip_hash) VALUES (${ipHash})`;
     return { error: "Wrong username or password." };
   }
 
-  await sql`DELETE FROM login_attempts WHERE ip_hash = ${ipHash}`;
+  await db()`DELETE FROM login_attempts WHERE ip_hash = ${ipHash}`;
   await createSession(expectedUser);
   redirect("/admin/inquiries");
 }
@@ -68,6 +68,6 @@ export async function deleteInquiry(formData: FormData) {
   await requireAdmin();
   const id = String(formData.get("id") ?? "");
   if (!/^\d+$/.test(id)) return;
-  await sql`DELETE FROM inquiries WHERE id = ${id}`;
+  await db()`DELETE FROM inquiries WHERE id = ${id}`;
   revalidatePath("/admin/inquiries");
 }

@@ -3,7 +3,7 @@
 import { after } from "next/server";
 import { Resend } from "resend";
 import { z } from "zod";
-import { sql } from "@/lib/db";
+import { db } from "@/lib/db";
 import { getIpHash } from "@/lib/request";
 
 const MAX_PER_HOUR = 3;
@@ -59,7 +59,7 @@ export async function submitInquiry(
   const ipHash = await getIpHash();
 
   try {
-    const [{ count }] = await sql<{ count: number }[]>`
+    const [{ count }] = await db()<{ count: number }[]>`
       SELECT count(*)::int AS count FROM inquiries
       WHERE ip_hash = ${ipHash} AND created_at > now() - interval '1 hour'
     `;
@@ -71,7 +71,7 @@ export async function submitInquiry(
       };
     }
 
-    await sql`
+    await db()`
       INSERT INTO inquiries (name, email, phone, note, ip_hash)
       VALUES (${name}, ${email}, ${phone || null}, ${note}, ${ipHash})
     `;
