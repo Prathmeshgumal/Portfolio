@@ -9,7 +9,8 @@ import { useEffect, useRef } from "react";
  *
  * Moves: walk, look around, blink & ear twitch, type on a laptop,
  * say hi (on click) and nap (after 20s without any visitor activity).
- * It stands still for visitors who prefer reduced motion, and is hidden
+ * For visitors who prefer reduced motion it stays in place (no walking or
+ * hopping) but still blinks, looks around, types and naps. It is hidden
  * on small screens and on /admin.
  */
 
@@ -35,6 +36,7 @@ type State = {
   lookOff: number;
   lookTime: number;
   zzTime: number;
+  still: boolean;
 };
 
 const COLORS = {
@@ -102,7 +104,7 @@ function drawByte(ctx: CanvasRenderingContext2D, s: State) {
     px(2, 7, 1, 2, O);
     if (s.wave > 0) px(13, 4 + (Math.floor(s.wave * 8) % 2), 1, 3, O);
     else px(13, 7, 1, 2, O);
-    const walking = s.mode === "walk" && s.hop === 0;
+    const walking = s.mode === "walk" && s.hop === 0 && !s.still;
     if (walking && s.frame) {
       px(5, 11, 2, 2, K);
       px(10, 11, 2, 1, K);
@@ -140,7 +142,7 @@ export default function ByteBuddy() {
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
     const s: State = {
       x: 24, dir: 1, mode: "walk", modeTime: rand(2.5, 5), frame: 0, frameTime: 0,
-      hop: 0, vy: 0, wave: 0, ear: 0, blink: 0, lookOff: 0, lookTime: 0, zzTime: 0,
+      hop: 0, vy: 0, wave: 0, ear: 0, blink: 0, lookOff: 0, lookTime: 0, zzTime: 0, still: reduceMotion.matches,
     };
     let lastActivity = performance.now();
     let bubbleTimer: ReturnType<typeof setTimeout> | undefined;
@@ -178,7 +180,8 @@ export default function ByteBuddy() {
     };
 
     const nextMode = () => {
-      if (s.mode !== "walk") {
+      // Reduced motion: Byte stays in place and only does small moves.
+      if (s.mode !== "walk" && !reduceMotion.matches) {
         s.mode = "walk";
         s.lookOff = 0;
         s.modeTime = rand(2.5, 5);
@@ -191,7 +194,8 @@ export default function ByteBuddy() {
     };
 
     const render = () => {
-      const bob = s.mode === "walk" && s.hop === 0 ? (s.frame ? -2 : 0) : s.mode === "sleep" ? (s.frame ? 1 : 0) : 0;
+      const still = reduceMotion.matches;
+      const bob = still ? 0 : s.mode === "walk" && s.hop === 0 ? (s.frame ? -2 : 0) : s.mode === "sleep" ? (s.frame ? 1 : 0) : 0;
       const y = s.hop + bob;
       canvas.style.transform = `translate(${s.x}px, ${y}px)`;
       bubble.style.transform = `translate(${s.x + (W * PX) / 2 - 14}px, ${y - 28}px)`;
@@ -206,17 +210,10 @@ export default function ByteBuddy() {
     };
 
     const step = (dt: number) => {
+      s.still = reduceMotion.matches;
       const end = laneEnd();
       // Not enough room next to the dock: keep Byte out of the way.
       root.style.visibility = end - laneStart < 120 ? "hidden" : "visible";
-
-      if (reduceMotion.matches) {
-        s.mode = "idle";
-        s.hop = 0;
-        s.x = Math.min(Math.max(s.x, laneStart), Math.max(laneStart, end));
-        render();
-        return;
-      }
 
       if (s.hop !== 0) {
         s.vy += 900 * dt;
@@ -240,7 +237,7 @@ export default function ByteBuddy() {
         s.lookTime += dt;
         if (s.lookTime > 0.7) { s.lookTime = 0; s.lookOff = s.lookOff === 1 ? -1 : 1; }
       }
-      if (s.mode === "walk") {
+      if (s.mode === "walk" && !reduceMotion.matches) {
         s.x += s.dir * 36 * dt;
         if (s.x < laneStart) { s.x = laneStart; s.dir = 1; }
         if (s.x > end) { s.x = end; s.dir = -1; }

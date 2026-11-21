@@ -424,6 +424,9 @@ export default function ContactWidget() {
         onClick={() => (open ? close() : setOpen(true))}
         aria-expanded={open}
         aria-controls="contact-widget"
+        // Set explicitly: motion adds tabindex only when tap animations are on,
+        // which differs between server and a reduced-motion browser.
+        tabIndex={0}
         whileHover={reduceMotion ? undefined : { y: -2 }}
         whileTap={reduceMotion ? undefined : { scale: 0.96 }}
         className="group flex h-12 items-center gap-2.5 rounded-full border bg-card/90 py-1.5 pl-1.5 pr-5 text-sm font-medium shadow-[0_8px_24px_-6px_rgba(0,0,0,0.18)] backdrop-blur-xl transition-shadow hover:shadow-[0_12px_28px_-6px_rgba(0,0,0,0.24)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
