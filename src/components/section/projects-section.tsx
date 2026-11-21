@@ -14,7 +14,7 @@ export default function ProjectsSection() {
                             className="flex-1 h-px bg-linear-to-r from-transparent from-5% via-border via-95% to-transparent"
 
                         />
-                        <div className="border bg-primary z-10 rounded-xl px-4 py-1">
+                        <div data-byte-perch data-byte-say="the good stuff ↓" className="border bg-primary z-10 rounded-xl px-4 py-1">
                             <span className="text-background text-sm font-medium">My Projects</span>
                         </div>
                         <div
@@ -38,17 +38,18 @@ export default function ProjectsSection() {
                             delay={BLUR_FADE_DELAY * 12 + id * 0.05}
                             className="h-full"
                         >
-                            <ProjectCard
-                                href={project.href}
-                                key={project.title}
-                                title={project.title}
-                                description={project.description}
-                                dates={project.dates}
-                                tags={project.technologies}
-                                image={project.image}
-                                video={project.video}
-                                links={project.links}
-                            />
+                            <div data-byte-perch data-byte-card data-byte-say={project.byteSays} className="h-full">
+                                <ProjectCard
+                                    href={project.href}
+                                    title={project.title}
+                                    description={project.description}
+                                    dates={project.dates}
+                                    tags={project.technologies}
+                                    image={project.image}
+                                    video={project.video}
+                                    links={project.links}
+                                />
+                            </div>
                         </BlurFade>
                     ))}
                 </div>

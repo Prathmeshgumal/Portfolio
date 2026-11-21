@@ -4,298 +4,913 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
 
 /**
- * Byte: a small pixel character that wanders along the bottom-left of the
- * screen, between the left edge and the dock. Drawn on a canvas, no libraries.
+ * Byte: a small pixel character that lives on the page.
  *
- * Moves: walk, look around, blink & ear twitch, type on a laptop,
- * say hi (on click) and nap (after 20s without any visitor activity).
- * For visitors who prefer reduced motion it stays in place (no walking or
- * hopping) but still blinks, looks around, types and naps. It is hidden
- * on small screens and on /admin.
+ * It starts in the bottom-left corner, then explores: climbs onto headings,
+ * the avatar, project cards and the contact card (anything marked with
+ * `data-byte-perch`), says the line in `data-byte-say` when it arrives,
+ * walks along the top edge, types, reads, peeks over the edge and plants
+ * little flags. It hops between nearby spots, floats down with an umbrella
+ * when its spot scrolls away, runs to a project card the visitor hovers,
+ * and can be picked up and thrown. Clicking it makes it wave.
+ *
+ * For visitors who prefer reduced motion it stays in the corner and only
+ * does small in-place moves. Hidden on small screens and on /admin.
  */
 
+// ---------- Sprite ----------
+
 const PX = 5; // screen pixels per sprite pixel
-const W = 16;
-const H = 14;
-const NAP_AFTER_MS = 20_000;
+const COLS = 16;
+const ROWS = 22;
+const TOP = 6; // sprite rows start here, leaving headroom for the umbrella
+const CW = COLS * PX;
+const CH = ROWS * PX;
+const FEET = (TOP + 13) * PX; // y inside the canvas where the feet touch the ground
 
-type Mode = "walk" | "look" | "idle" | "type" | "sleep";
-
-type State = {
-  x: number;
-  dir: 1 | -1;
-  mode: Mode;
-  modeTime: number;
-  frame: 0 | 1;
-  frameTime: number;
-  hop: number;
-  vy: number;
-  wave: number;
-  ear: number;
-  blink: number;
-  lookOff: number;
-  lookTime: number;
-  zzTime: number;
-  still: boolean;
-};
-
-const COLORS = {
+const C = {
   outline: "#3a2418",
   body: "#e8743b",
   light: "#f6a86f",
   visor: "#2a1a12",
   eye: "#7dd3fc",
   eyeDim: "#bae6fd",
-  laptop: "#9ca3af",
+  metal: "#9ca3af",
+  hook: "#4b5563",
+  umbrella: "#14b8a6",
+  umbrellaLight: "#5eead4",
+  book: "#60a5fa",
+  bookSpine: "#1d4ed8",
 };
 
-function drawByte(ctx: CanvasRenderingContext2D, s: State) {
-  const px = (x: number, y: number, w: number, h: number, c: string) => {
-    ctx.fillStyle = c;
-    ctx.fillRect(x * PX, y * PX, w * PX, h * PX);
-  };
-  const { outline: K, body: O, light: L, visor: V, eye: C, laptop: G } = COLORS;
+type Pose =
+  | "walk" | "stand" | "look" | "type" | "read" | "sleep" | "sit"
+  | "climb" | "dangle" | "fall" | "umbrella" | "point" | "hold";
 
-  ctx.clearRect(0, 0, W * PX, H * PX);
+type Look = { dir: 1 | -1; frame: 0 | 1; blink: boolean; ear: boolean; lookOff: number; wave: number };
+
+function drawByte(ctx: CanvasRenderingContext2D, pose: Pose, d: Look) {
+  const p = (x: number, y: number, w: number, h: number, c: string) => {
+    ctx.fillStyle = c;
+    ctx.fillRect(x * PX, (y + TOP) * PX, w * PX, h * PX);
+  };
+  const { outline: K, body: O, light: L, visor: V, eye: E } = C;
+  ctx.clearRect(0, 0, CW, CH);
   ctx.save();
-  if (s.dir < 0) {
-    ctx.translate(W * PX, 0);
+  if (d.dir < 0) {
+    ctx.translate(CW, 0);
     ctx.scale(-1, 1);
   }
 
-  const sitting = s.mode === "type" || s.mode === "sleep";
+  const sitting = pose === "type" || pose === "sleep" || pose === "read" || pose === "sit";
   const oy = sitting ? 2 : 0;
+  const surprised = pose === "dangle" || pose === "fall" || pose === "hold";
 
-  // Ears, then body with a lighter top edge, then visor.
-  px(4, 1 + oy - (s.ear > 0 ? 1 : 0), 2, 2, O);
-  px(10, 1 + oy, 2, 2, O);
-  px(3, 3 + oy, 10, 8 - oy, K);
-  px(4, 3 + oy, 8, 8 - oy, O);
-  px(4, 3 + oy, 8, 1, L);
-  px(5, 5 + oy, 7, 3, V);
+  if (pose === "umbrella") {
+    p(11, -6, 4, 1, C.umbrellaLight);
+    p(10, -5, 6, 1, C.umbrella);
+    p(14, -4, 1, 9, C.metal);
+  }
+
+  // Ears, body, visor
+  p(4, 1 + oy - (d.ear ? 1 : 0), 2, 2, O);
+  p(10, 1 + oy, 2, 2, O);
+  p(3, 3 + oy, 10, 8 - oy, K);
+  p(4, 3 + oy, 8, 8 - oy, O);
+  p(4, 3 + oy, 8, 1, L);
+  p(5, 5 + oy, 7, 3, V);
 
   // Eyes
-  const look = s.mode === "look" ? s.lookOff : 0;
-  if (s.mode === "sleep") {
-    px(6, 6 + oy, 2, 1, C);
-    px(9, 6 + oy, 2, 1, C);
-  } else if (s.blink > 0) {
-    px(7 + look, 6 + oy, 1, 1, C);
-    px(10 + look, 6 + oy, 1, 1, C);
+  const lk = pose === "walk" || surprised ? 0 : d.lookOff;
+  if (pose === "sleep") {
+    p(6, 6 + oy, 2, 1, E);
+    p(9, 6 + oy, 2, 1, E);
+  } else if (surprised) {
+    p(6, 5 + oy, 2, 2, E);
+    p(9, 5 + oy, 2, 2, E);
+  } else if (pose === "read") {
+    p(7, 6 + oy, 1, 1, E);
+    p(10, 6 + oy, 1, 1, E);
+  } else if (d.blink) {
+    p(7 + lk, 6 + oy, 1, 1, E);
+    p(10 + lk, 6 + oy, 1, 1, E);
   } else {
-    px(7 + look, 5 + oy, 1, 2, C);
-    px(10 + look, 5 + oy, 1, 2, C);
+    p(7 + lk, 5 + oy, 1, 2, E);
+    p(10 + lk, 5 + oy, 1, 2, E);
   }
-  px(5, 9, 2, 1, L); // chest badge
+  p(5, 9, 2, 1, L); // chest badge
 
-  if (s.mode === "type") {
-    px(10, 9, 5, 1, G);
-    px(13, 6, 1, 3, G);
-    px(14, 6, 1, 1, s.frame ? C : COLORS.eyeDim);
-    px(12, 8 + (s.frame ? 0 : 1), 1, 1, O);
-    px(4, 11, 3, 1, K);
-    px(9, 11, 3, 1, K);
-  } else if (s.mode === "sleep") {
-    px(2, 9, 1, 2, O);
-    px(13, 9, 1, 2, O);
-    px(4, 11, 3, 1, K);
-    px(9, 11, 3, 1, K);
-  } else {
-    px(2, 7, 1, 2, O);
-    if (s.wave > 0) px(13, 4 + (Math.floor(s.wave * 8) % 2), 1, 3, O);
-    else px(13, 7, 1, 2, O);
-    const walking = s.mode === "walk" && s.hop === 0 && !s.still;
-    if (walking && s.frame) {
-      px(5, 11, 2, 2, K);
-      px(10, 11, 2, 1, K);
-    } else if (walking) {
-      px(5, 11, 2, 1, K);
-      px(10, 11, 2, 2, K);
-    } else {
-      px(5, 11, 2, 2, K);
-      px(10, 11, 2, 2, K);
+  const sitLegs = () => {
+    p(4, 11, 3, 1, K);
+    p(9, 11, 3, 1, K);
+  };
+  const standLegs = () => {
+    p(5, 11, 2, 2, K);
+    p(10, 11, 2, 2, K);
+  };
+
+  switch (pose) {
+    case "type":
+      p(10, 9, 5, 1, C.metal);
+      p(13, 6, 1, 3, C.metal);
+      p(14, 6, 1, 1, d.frame ? E : C.eyeDim);
+      p(12, 8 + (d.frame ? 0 : 1), 1, 1, O);
+      sitLegs();
+      break;
+    case "read":
+      p(8, 7, 5, 3, C.book);
+      p(10, 7, 1, 3, C.bookSpine);
+      p(7, 9, 1, 1, O);
+      p(13, 9, 1, 1, O);
+      sitLegs();
+      break;
+    case "sleep":
+      p(2, 9, 1, 2, O);
+      p(13, 9, 1, 2, O);
+      sitLegs();
+      break;
+    case "sit": // sitting on an edge, legs dangling over it
+      p(2, 9, 1, 2, O);
+      p(13, 9, 1, 2, O);
+      p(5, 11, 2, 3, K);
+      p(10, 11, 2, d.frame ? 4 : 3, K);
+      break;
+    case "climb": // hands on the rope above the head, one over the other
+      p(6, (d.frame ? 0 : 2) - 2, 1, 3, O);
+      p(9, (d.frame ? 2 : 0) - 2, 1, 3, O);
+      p(5, 11, 2, d.frame ? 2 : 1, K);
+      p(10, 11, 2, d.frame ? 1 : 2, K);
+      break;
+    case "dangle":
+      p(2, 1, 1, 3, O);
+      p(13, 1, 1, 3, O);
+      p(5, 11, 2, 3, K);
+      p(10, 11, 2, 3, K);
+      break;
+    case "fall":
+      p(2, 1, 1, 3, O);
+      p(13, 1, 1, 3, O);
+      p(4, 11, 2, 2, K);
+      p(11, 11, 2, 2, K);
+      break;
+    case "hold":
+      p(2, 1, 1, 3, O);
+      p(13, 1, 1, 3, O);
+      standLegs();
+      break;
+    case "umbrella":
+      p(2, 7, 1, 2, O);
+      p(13, 4, 1, 2, O);
+      p(5, 11, 2, 3, K);
+      p(10, 11, 2, 3, K);
+      break;
+    case "point":
+      p(2, 7, 1, 2, O);
+      p(13, 7, 3, 1, O);
+      standLegs();
+      break;
+    default: {
+      p(2, 7, 1, 2, O);
+      if (d.wave > 0) p(13, 4 + (Math.floor(d.wave * 8) % 2), 1, 3, O);
+      else p(13, 7, 1, 2, O);
+      if (pose === "walk" && d.frame) {
+        p(5, 11, 2, 2, K);
+        p(10, 11, 2, 1, K);
+      } else if (pose === "walk") {
+        p(5, 11, 2, 1, K);
+        p(10, 11, 2, 2, K);
+      } else standLegs();
     }
   }
   ctx.restore();
 }
 
+// ---------- Behaviour ----------
+
+const GRAVITY = 1100;
+const NAP_AFTER_MS = 20_000;
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
+const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
+const pick = <T,>(items: T[]) => items[Math.floor(Math.random() * items.length)];
+
+type Where = "floor" | "perch" | "climb" | "air" | "drag";
+type Act = "walk" | "look" | "idle" | "type" | "read" | "peek" | "flag" | "say" | "sleep";
+
+const FLAG_SVG =
+  '<svg width="16" height="24" viewBox="0 0 4 6" shape-rendering="crispEdges" aria-hidden="true">' +
+  `<rect x="0" y="0" width="1" height="6" fill="${C.outline}"/>` +
+  `<rect x="1" y="0" width="3" height="1" fill="${C.body}"/>` +
+  `<rect x="1" y="1" width="2" height="1" fill="${C.body}"/>` +
+  `<rect x="1" y="2" width="1" height="1" fill="${C.light}"/></svg>`;
 
 export default function ByteBuddy() {
   const pathname = usePathname();
   const hidden = pathname?.startsWith("/admin");
-  const rootRef = useRef<HTMLDivElement>(null);
+  const fixedLayerRef = useRef<HTMLDivElement>(null);
+  const absLayerRef = useRef<HTMLDivElement>(null);
+  const actorRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
   const zzRef = useRef<HTMLDivElement>(null);
-  const sayHiRef = useRef<() => void>(() => {});
+  const ropeRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (hidden) return;
-    const root = rootRef.current;
+    const fixedLayer = fixedLayerRef.current;
+    const absLayer = absLayerRef.current;
+    const actor = actorRef.current;
     const canvas = canvasRef.current;
     const bubble = bubbleRef.current;
     const zz = zzRef.current;
     const ctx = canvas?.getContext("2d");
-    if (!root || !canvas || !bubble || !zz || !ctx) return;
+    if (!fixedLayer || !absLayer || !actor || !canvas || !bubble || !zz || !ctx || !ropeRef.current) return;
 
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const s: State = {
-      x: 24, dir: 1, mode: "walk", modeTime: rand(2.5, 5), frame: 0, frameTime: 0,
-      hop: 0, vy: 0, wave: 0, ear: 0, blink: 0, lookOff: 0, lookTime: 0, zzTime: 0, still: reduceMotion.matches,
-    };
-    let lastActivity = performance.now();
-    let bubbleTimer: ReturnType<typeof setTimeout> | undefined;
+    const wideEnough = window.matchMedia("(min-width: 640px)");
 
-    // Byte's walking lane: from the left edge up to just before the dock.
+    const s = {
+      where: "floor" as Where,
+      x: 24,
+      feet: window.innerHeight - 16,
+      vx: 0,
+      vy: 0,
+      umbrella: false,
+      dir: 1 as 1 | -1,
+      frame: 0 as 0 | 1,
+      frameT: 0,
+      blink: 0,
+      ear: 0,
+      lookOff: 0,
+      lookT: 0,
+      wave: 0,
+      hop: 0,
+      hopV: 0,
+      act: "walk" as Act,
+      actT: 3,
+      moving: false,
+      atEdge: false,
+      pointing: false,
+      perch: null as HTMLElement | null,
+      perchDx: 0,
+      perchT: 0,
+      stay: 12,
+      lastPerch: null as HTMLElement | null,
+      goal: null as HTMLElement | null,
+      floorT: 0,
+      zzT: 0,
+      bubbleUntil: 0,
+    };
+    // The rope: thrown up before a climb, pulled up after it.
+    const rope = { mode: "none" as "none" | "throw" | "climb" | "retract", t: 0, anchor: null as HTMLElement | null, startTop: 0 };
+    const saidAt = new WeakMap<Element, number>();
+    const flagged = new WeakSet<Element>();
+    let lastActivity = performance.now();
+    let fastScrollUntil = 0;
+    let lastWhoa = 0;
+    let lastNearWave = 0;
+    let nearSince = 0;
+    let lastGoalAt = 0;
+    const pointer = { x: -9999, y: -9999, inside: false };
+    let hovered: HTMLElement | null = null;
+    let hoveredSince = 0;
+
+    const floorY = () => window.innerHeight - 16;
+    const perches = () => Array.from(document.querySelectorAll<HTMLElement>("[data-byte-perch]"));
     const laneEnd = () => {
       const dock = document.querySelector("[data-dock-lane]")?.firstElementChild;
       const right = dock ? dock.getBoundingClientRect().left : window.innerWidth / 2;
-      return right - 24 - W * PX;
+      return right - 24 - CW;
     };
-    const laneStart = 20;
+    const ROPE_INSET = 3; // the rope hangs this far left of the spot's edge
+    const climbX = (r: DOMRect) => r.left - ROPE_INSET - CW / 2;
+    const usable = (r: DOMRect) => r.width >= 50 && r.top > 120 && r.top < floorY() - 70;
+
+    function say(text: string, ms = 2200) {
+      bubble!.textContent = text;
+      bubble!.style.opacity = "1";
+      s.bubbleUntil = performance.now() + ms;
+    }
+
+    function hopInPlace() {
+      if (s.hop === 0 && !reduceMotion.matches) {
+        s.hop = -0.001;
+        s.hopV = -250;
+      }
+    }
+
+    function setAct(act: Act, t: number) {
+      s.act = act;
+      s.actT = t;
+      s.atEdge = false;
+      s.pointing = false;
+    }
+
+    // Plant a small flag on the current spot. It fades away after a while.
+    function plantFlag(r: DOMRect) {
+      const flag = document.createElement("div");
+      flag.innerHTML = FLAG_SVG;
+      flag.style.cssText = "position:absolute;pointer-events:none;transition:opacity 1s";
+      flag.style.left = `${r.left + window.scrollX + s.perchDx + CW / 2 + s.dir * 22}px`;
+      flag.style.top = `${r.top + window.scrollY - 24}px`;
+      absLayer!.appendChild(flag);
+      setTimeout(() => (flag.style.opacity = "0"), 18_000);
+      setTimeout(() => flag.remove(), 19_200);
+    }
+
+    function land(el: HTMLElement, r: DOMRect) {
+      s.where = "perch";
+      s.perch = el;
+      s.perchDx = clamp(s.x - r.left, -12, r.width - CW + 12);
+      s.perchT = 0;
+      s.stay = rand(9, 15);
+      s.vx = s.vy = 0;
+      s.umbrella = false;
+      if (s.goal === el) s.goal = null;
+      const line = el.dataset.byteSay;
+      const last = saidAt.get(el) ?? -Infinity;
+      if (line && performance.now() - last > 25_000) {
+        saidAt.set(el, performance.now());
+        setAct("say", 2.6);
+        s.pointing = el.hasAttribute("data-byte-point");
+        if (s.pointing) s.dir = 1;
+        say(line, 2600);
+      } else setAct("look", 1);
+    }
+
+    function jumpTo(r: DOMRect) {
+      const lx = clamp(s.x, r.left - 6, r.right - CW + 6) + rand(-20, 20);
+      const dy = r.top - s.feet;
+      const T = 0.65 + Math.min(0.5, Math.abs(lx - s.x) / 1400);
+      s.vx = (lx - s.x) / T;
+      s.vy = (dy - 0.5 * GRAVITY * T * T) / T;
+      s.dir = s.vx >= 0 ? 1 : -1;
+      s.where = "air";
+      s.umbrella = false;
+    }
+
+    function leavePerch() {
+      const from = s.perch;
+      s.lastPerch = from;
+      s.perch = null;
+      const options = perches()
+        .filter((el) => el !== from)
+        .map((el) => ({ el, r: el.getBoundingClientRect() }))
+        .filter(({ r }) => {
+          if (!usable(r)) return false;
+          const dx = r.left + r.width / 2 - (s.x + CW / 2);
+          const dy = r.top - s.feet;
+          return Math.abs(dx) < 560 && dy > -280 && dy < 380;
+        });
+      const goal = options.find((o) => o.el === s.goal);
+      const target = goal ?? (Math.random() < 0.65 ? pick(options) : undefined);
+      if (target) {
+        jumpTo(target.r);
+        return;
+      }
+      // Nowhere to hop to: jump down to the floor.
+      s.where = "air";
+      s.vx = s.x > laneEnd() ? -160 : rand(-90, 90);
+      s.vy = -220;
+      s.dir = s.vx >= 0 ? 1 : -1;
+    }
+
+    function pickFloorGoal(): HTMLElement | null {
+      const maxX = window.innerWidth - 300 - CW;
+      const options = perches()
+        .map((el) => ({ el, r: el.getBoundingClientRect() }))
+        .filter(({ el, r }) => el !== s.lastPerch && usable(r) && climbX(r) > 8 && climbX(r) < maxX);
+      if (!options.length) return null;
+      const weighted = options.flatMap((o) =>
+        o.el.hasAttribute("data-byte-point") ? [o, o, o] : o.el.hasAttribute("data-byte-card") ? [o, o] : [o]
+      );
+      return pick(weighted).el;
+    }
+
+    // ---------- Input ----------
 
     const onActivity = () => {
       lastActivity = performance.now();
-      if (s.mode === "sleep") {
-        s.mode = "idle";
-        s.modeTime = 0.6;
-      }
+      if (s.act === "sleep") setAct("idle", 0.6);
     };
-    const events = ["pointermove", "keydown", "scroll", "touchstart"] as const;
-    events.forEach((e) => window.addEventListener(e, onActivity, { passive: true }));
-
-    sayHiRef.current = () => {
+    const onPointerMove = (e: PointerEvent) => {
       onActivity();
-      if (s.hop === 0 && !reduceMotion.matches) {
-        s.vy = -250;
-        s.hop = -0.001;
+      pointer.x = e.clientX;
+      pointer.y = e.clientY;
+      pointer.inside = true;
+      const card = (e.target as Element | null)?.closest?.<HTMLElement>("[data-byte-card]") ?? null;
+      if (card !== hovered) {
+        hovered = card;
+        hoveredSince = performance.now();
       }
-      s.mode = "idle";
-      s.modeTime = 1.4;
-      s.wave = 1.2;
-      bubble.style.opacity = "1";
-      clearTimeout(bubbleTimer);
-      bubbleTimer = setTimeout(() => (bubble.style.opacity = "0"), 1200);
     };
+    const onPointerLeave = () => {
+      pointer.inside = false;
+      hovered = null;
+    };
+    let lastScrollY = window.scrollY;
+    let lastScrollT = performance.now();
+    const onScroll = () => {
+      onActivity();
+      const now = performance.now();
+      const v = Math.abs(window.scrollY - lastScrollY) / Math.max(1, now - lastScrollT);
+      lastScrollY = window.scrollY;
+      lastScrollT = now;
+      if (v > 2.5 && s.where === "perch") {
+        fastScrollUntil = now + 350;
+        if (now - lastWhoa > 9000) {
+          lastWhoa = now;
+          say("whoa!", 1200);
+        }
+      }
+    };
+    window.addEventListener("pointermove", onPointerMove, { passive: true });
+    document.documentElement.addEventListener("pointerleave", onPointerLeave);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("keydown", onActivity);
 
-    const nextMode = () => {
-      // Reduced motion: Byte stays in place and only does small moves.
-      if (s.mode !== "walk" && !reduceMotion.matches) {
-        s.mode = "walk";
-        s.lookOff = 0;
-        s.modeTime = rand(2.5, 5);
-        if (Math.random() < 0.4) s.dir = s.dir === 1 ? -1 : 1;
+    // Click to say hi; press and drag to pick Byte up and throw it.
+    const drag = { down: false, dragging: false, sx: 0, sy: 0, gx: 0, gy: 0, lx: 0, ly: 0, lt: 0, vx: 0, vy: 0 };
+    const onDown = (e: PointerEvent) => {
+      e.preventDefault();
+      canvas.setPointerCapture(e.pointerId);
+      onActivity();
+      Object.assign(drag, {
+        down: true, dragging: false, sx: e.clientX, sy: e.clientY,
+        gx: e.clientX - s.x, gy: e.clientY - (s.feet - FEET),
+        lx: e.clientX, ly: e.clientY, lt: performance.now(), vx: 0, vy: 0,
+      });
+    };
+    const onMove = (e: PointerEvent) => {
+      if (!drag.down) return;
+      const now = performance.now();
+      const dt = Math.max(1, now - drag.lt) / 1000;
+      drag.vx = (e.clientX - drag.lx) / dt;
+      drag.vy = (e.clientY - drag.ly) / dt;
+      drag.lx = e.clientX;
+      drag.ly = e.clientY;
+      drag.lt = now;
+      if (!drag.dragging && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 6 && !reduceMotion.matches) {
+        drag.dragging = true;
+        s.where = "drag";
+        s.perch = null;
+        s.goal = null;
+        setAct("idle", 1);
+        say("hey!", 900);
+      }
+    };
+    const onUp = () => {
+      if (!drag.down) return;
+      drag.down = false;
+      if (drag.dragging) {
+        s.where = "air";
+        s.vx = clamp(drag.vx * 0.5, -900, 900);
+        s.vy = clamp(drag.vy * 0.5, -900, 900);
+        if (Math.hypot(s.vx, s.vy) > 400) say("wheee!", 1200);
         return;
       }
-      const r = Math.random();
-      s.mode = r < 0.4 ? "type" : r < 0.75 ? "look" : "idle";
-      s.modeTime = s.mode === "type" ? rand(2.5, 4) : s.mode === "look" ? rand(1.6, 2.4) : rand(1, 1.8);
+      // A plain click
+      setAct("idle", 1.4);
+      s.wave = 1.2;
+      hopInPlace();
+      say(pick(["hi!", "hello!", "👋", "beep boop"]), 1300);
     };
+    canvas.addEventListener("pointerdown", onDown);
+    canvas.addEventListener("pointermove", onMove);
+    canvas.addEventListener("pointerup", onUp);
+    canvas.addEventListener("pointercancel", onUp);
 
-    const render = () => {
-      const still = reduceMotion.matches;
-      const bob = still ? 0 : s.mode === "walk" && s.hop === 0 ? (s.frame ? -2 : 0) : s.mode === "sleep" ? (s.frame ? 1 : 0) : 0;
-      const y = s.hop + bob;
-      canvas.style.transform = `translate(${s.x}px, ${y}px)`;
-      bubble.style.transform = `translate(${s.x + (W * PX) / 2 - 14}px, ${y - 28}px)`;
-      if (s.mode === "sleep") {
-        zz.style.opacity = String(s.zzTime < 1.6 ? 1 - s.zzTime / 1.6 : 0);
-        zz.textContent = s.zzTime < 0.7 ? "z" : "z z";
-        zz.style.transform = `translate(${s.x + W * PX - 18 + s.zzTime * 8}px, ${y + 4 - s.zzTime * 18}px)`;
-      } else {
-        zz.style.opacity = "0";
-      }
-      drawByte(ctx, s);
-    };
+    // ---------- Update ----------
 
-    const step = (dt: number) => {
-      s.still = reduceMotion.matches;
+    function updateFloor(dt: number, now: number) {
+      s.feet = floorY();
+      s.floorT += dt;
       const end = laneEnd();
-      // Not enough room next to the dock: keep Byte out of the way.
-      root.style.visibility = end - laneStart < 120 ? "hidden" : "visible";
+      if (s.act === "sleep") return;
 
-      if (s.hop !== 0) {
-        s.vy += 900 * dt;
-        s.hop += s.vy * dt;
-        if (s.hop >= 0) { s.hop = 0; s.vy = 0; }
+      if (s.goal) {
+        const r = s.goal.getBoundingClientRect();
+        if (!usable(r)) {
+          s.goal = null;
+          return;
+        }
+        const tx = climbX(r);
+        const dx = tx - s.x;
+        s.dir = dx >= 0 ? 1 : -1;
+        s.moving = Math.abs(dx) > 2;
+        s.x += Math.sign(dx) * Math.min(Math.abs(dx), 75 * dt);
+        if (!s.moving) {
+          s.where = "climb";
+          s.dir = 1;
+          Object.assign(rope, { mode: "throw", t: 0, anchor: s.goal, startTop: s.feet - FEET + 10 });
+        }
+        return;
       }
-      s.wave = Math.max(0, s.wave - dt);
 
-      if (s.mode !== "sleep" && performance.now() - lastActivity > NAP_AFTER_MS) {
-        s.mode = "sleep";
-        s.zzTime = 0;
-      }
-      if (s.mode === "sleep") {
-        s.zzTime = (s.zzTime + dt) % 2;
-      } else {
-        s.modeTime -= dt;
-        if (s.modeTime <= 0) nextMode();
-      }
-
-      if (s.mode === "look") {
-        s.lookTime += dt;
-        if (s.lookTime > 0.7) { s.lookTime = 0; s.lookOff = s.lookOff === 1 ? -1 : 1; }
-      }
-      if (s.mode === "walk" && !reduceMotion.matches) {
+      s.actT -= dt;
+      if (s.act === "walk") {
+        s.moving = true;
         s.x += s.dir * 36 * dt;
-        if (s.x < laneStart) { s.x = laneStart; s.dir = 1; }
-        if (s.x > end) { s.x = end; s.dir = -1; }
-      } else {
-        s.x = Math.min(Math.max(s.x, laneStart), Math.max(laneStart, end));
+        if (s.x < 20) { s.x = 20; s.dir = 1; }
+        if (s.x > end && s.dir > 0) s.dir = -1;
+      } else if (s.x > end + 4) {
+        // Landed somewhere outside the corner: walk back first.
+        setAct("walk", 2);
+        s.dir = -1;
+      }
+      if (s.actT <= 0) {
+        if (s.floorT > 4 && now - lastGoalAt > 3000 && Math.random() < 0.7) {
+          const goal = pickFloorGoal();
+          if (goal) {
+            s.goal = goal;
+            lastGoalAt = now;
+            setAct("walk", 1);
+            return;
+          }
+        }
+        const r = Math.random();
+        if (s.act !== "walk") setAct("walk", rand(2, 4));
+        else setAct(r < 0.35 ? "type" : r < 0.7 ? "look" : "idle", r < 0.35 ? rand(2.5, 4) : rand(1, 2));
+        if (s.act === "walk" && Math.random() < 0.4) s.dir = s.dir === 1 ? -1 : 1;
+      }
+    }
+
+    function updatePerch(dt: number, now: number) {
+      const el = s.perch!;
+      if (!el.isConnected) {
+        s.where = "air";
+        s.perch = null;
+        return;
+      }
+      const r = el.getBoundingClientRect();
+      s.x = r.left + s.perchDx;
+      s.feet = r.top;
+      if (r.top < 14) {
+        // Spot scrolled off the top: float down with the umbrella.
+        s.perch = null;
+        s.where = "air";
+        s.umbrella = true;
+        s.vx = rand(-30, 30);
+        s.vy = 0;
+        return;
+      }
+      if (r.top > floorY()) {
+        // Spot moved below the bottom of the screen: step onto the floor.
+        s.perch = null;
+        s.where = "floor";
+        s.floorT = 0;
+        setAct("look", 1);
+        return;
+      }
+      s.perchT += dt;
+      if (s.act === "sleep") return;
+
+      // A visitor hovered a project card for a moment: go and look at it.
+      if (hovered && hovered !== el && now - hoveredSince > 900 && now - lastGoalAt > 6000 && s.act !== "say") {
+        if (usable(hovered.getBoundingClientRect())) {
+          s.goal = hovered;
+          lastGoalAt = now;
+          say("ooh, that one!", 1300);
+          leavePerch();
+          return;
+        }
       }
 
-      s.frameTime += dt;
-      const frameLen = s.mode === "type" ? 0.1 : s.mode === "sleep" ? 0.8 : 0.2;
-      if (s.frameTime > frameLen) { s.frameTime = 0; s.frame = s.frame ? 0 : 1; }
-      s.ear = s.ear > 0 ? s.ear - dt : Math.random() < dt * (s.mode === "sleep" ? 0.1 : 0.5) ? 0.15 : 0;
+      const minDx = -12;
+      const maxDx = Math.max(minDx, r.width - CW + 12);
+      s.actT -= dt;
+      if (s.act === "walk") {
+        s.moving = true;
+        s.perchDx += s.dir * 36 * dt;
+        if (s.perchDx < minDx) { s.perchDx = minDx; s.dir = 1; }
+        if (s.perchDx > maxDx) { s.perchDx = maxDx; s.dir = -1; }
+      } else if (s.act === "peek" && !s.atEdge) {
+        const leftEdge = s.perchDx < (minDx + maxDx) / 2;
+        const target = leftEdge ? minDx - 14 : maxDx + 14;
+        const dx = target - s.perchDx;
+        s.dir = dx >= 0 ? 1 : -1;
+        s.moving = Math.abs(dx) > 2;
+        s.perchDx += Math.sign(dx) * Math.min(Math.abs(dx), 36 * dt);
+        if (!s.moving) {
+          s.atEdge = true;
+          s.dir = leftEdge ? -1 : 1;
+          s.actT = rand(2.5, 4);
+        }
+        return;
+      }
+
+      if (s.actT > 0) return;
+      if (s.atEdge) s.perchDx = clamp(s.perchDx, minDx, maxDx);
+      if (s.perchT > s.stay) {
+        leavePerch();
+        return;
+      }
+      const roomy = r.width >= 140;
+      const options: Act[] = ["walk", "walk", "look", "type", "read", "idle"];
+      if (roomy) options.push("peek");
+      if (roomy && !flagged.has(el)) options.push("flag", "flag");
+      const next = s.act === "walk" ? pick(options.filter((a) => a !== "walk")) : pick(options);
+      if (next === "flag") {
+        flagged.add(el);
+        setAct("flag", 1);
+        s.wave = 0.8;
+        plantFlag(r);
+        if (Math.random() < 0.5) say(pick(["mine!", "I was here", "📍"]), 1400);
+        return;
+      }
+      setAct(next, next === "walk" ? rand(1.5, 3.5) : next === "type" || next === "read" ? rand(2.5, 4) : next === "peek" ? 99 : rand(1, 2));
+    }
+
+    function updateAir(dt: number) {
+      s.vy += GRAVITY * dt;
+      if (s.umbrella) s.vy = Math.min(s.vy, 75);
+      const prevFeet = s.feet;
+      s.x += s.vx * dt;
+      s.feet += s.vy * dt;
+      if (s.x < 0) { s.x = 0; s.vx = -s.vx * 0.5; }
+      if (s.x > window.innerWidth - CW) { s.x = window.innerWidth - CW; s.vx = -s.vx * 0.5; }
+      if (Math.abs(s.vx) > 5) s.dir = s.vx > 0 ? 1 : -1;
+      if (s.vy > 0) {
+        const cx = s.x + CW / 2;
+        for (const el of perches()) {
+          const r = el.getBoundingClientRect();
+          if (r.width < 40 || r.top < 40 || r.top > floorY() - 30) continue;
+          if (prevFeet <= r.top + 2 && s.feet >= r.top && cx >= r.left - 10 && cx <= r.right + 10) {
+            s.x = clamp(s.x, r.left - 12, r.right - CW + 12);
+            land(el, r);
+            return;
+          }
+        }
+      }
+      if (s.feet >= floorY()) {
+        const hard = s.vy > 750;
+        s.feet = floorY();
+        s.where = "floor";
+        s.floorT = 0;
+        s.vx = s.vy = 0;
+        s.umbrella = false;
+        setAct("look", 1);
+        if (hard) say("oof", 900);
+      }
+    }
+
+    function updateClimb(dt: number) {
+      const el = s.goal;
+      const r = el?.getBoundingClientRect();
+      if (!el || !r || r.top < 40 || r.top > floorY()) {
+        s.goal = null;
+        s.where = "air";
+        s.vx = 0;
+        s.vy = 0;
+        rope.mode = "none";
+        return;
+      }
+      s.x = climbX(r);
+      s.dir = 1;
+      if (rope.mode === "throw") {
+        // Rope flies up and the hook catches the edge, then the climb starts.
+        if (rope.t >= 1) rope.mode = "climb";
+        return;
+      }
+      s.feet -= 95 * dt;
+      if (s.feet <= r.top) {
+        // Reached the top: pull up, hop over the edge and reel the rope in.
+        s.feet = r.top;
+        s.where = "air";
+        s.vx = 140;
+        s.vy = -230;
+        rope.mode = "retract";
+        rope.t = 0;
+      }
+    }
+
+    // ---------- Render ----------
+
+    function poseFor(now: number): Pose {
+      if (s.where === "drag") return "dangle";
+      if (s.where === "air") return s.umbrella ? "umbrella" : s.vy < -150 ? "climb" : "fall";
+      if (s.where === "climb") return rope.mode === "throw" ? "hold" : "climb";
+      if (s.where === "perch" && now < fastScrollUntil) return "hold";
+      switch (s.act) {
+        case "walk": return s.moving ? "walk" : "stand";
+        case "look": return "look";
+        case "type": return "type";
+        case "read": return "read";
+        case "sleep": return "sleep";
+        case "peek": return s.atEdge ? "sit" : s.moving ? "walk" : "stand";
+        case "say": return s.pointing ? "point" : "stand";
+        default: return "stand";
+      }
+    }
+
+    function renderRope(dt: number) {
+      const el = ropeRef.current!;
+      // Picked up or knocked off mid-climb: reel the rope in.
+      if ((rope.mode === "throw" || rope.mode === "climb") && s.where !== "climb") {
+        rope.mode = "retract";
+        rope.t = 0;
+      }
+      const r = rope.anchor?.getBoundingClientRect();
+      if (rope.mode === "none" || !r) {
+        el.style.opacity = "0";
+        return;
+      }
+      rope.t += dt / (rope.mode === "throw" ? 0.45 : 0.4);
+      const t = Math.min(1, rope.t);
+      const bottom = floorY() - 4;
+      let top = r.top;
+      let end = bottom;
+      if (rope.mode === "throw") top = rope.startTop + (r.top - rope.startTop) * (1 - (1 - t) * (1 - t));
+      if (rope.mode === "retract") {
+        end = bottom + (r.top - bottom) * t;
+        if (t >= 1) rope.mode = "none";
+      }
+      el.style.opacity = "1";
+      el.style.transform = `translate(${Math.round(r.left - ROPE_INSET - 2)}px, ${Math.round(top - 8)}px)`;
+      el.style.height = `${Math.max(0, Math.round(end - top + 8))}px`;
+    }
+
+    function render(now: number, dt: number) {
+      renderRope(dt);
+      const pose = poseFor(now);
+      const onPerch = s.where === "perch";
+      const layer = onPerch ? absLayer! : fixedLayer!;
+      if (actor!.parentElement !== layer) layer.appendChild(actor!);
+
+      const bob = pose === "walk" || pose === "climb" ? (s.frame ? -2 : 0) : pose === "sleep" ? (s.frame ? 1 : 0) : 0;
+      const top = s.feet - FEET + s.hop + (reduceMotion.matches ? 0 : bob);
+      const x = onPerch ? s.x + window.scrollX : s.x;
+      const y = onPerch ? top + window.scrollY : top;
+      actor!.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+
+      if (now > s.bubbleUntil) bubble!.style.opacity = "0";
+      if (pose === "sleep") {
+        zz!.style.opacity = String(s.zzT < 1.6 ? 1 - s.zzT / 1.6 : 0);
+        zz!.textContent = s.zzT < 0.7 ? "z" : "z z";
+        zz!.style.transform = `translate(${s.zzT * 8}px, ${-s.zzT * 18}px)`;
+      } else zz!.style.opacity = "0";
+
+      drawByte(ctx!, pose, {
+        dir: s.dir,
+        frame: s.frame,
+        blink: s.blink > 0,
+        ear: s.ear > 0,
+        lookOff: s.lookOff,
+        wave: s.wave,
+      });
+    }
+
+    function step(dt: number, now: number) {
+      // Small timers that run in every state.
+      s.frameT += dt;
+      const frameLen = s.act === "type" ? 0.1 : s.act === "sleep" ? 0.8 : s.where === "climb" ? 0.15 : 0.2;
+      if (s.frameT > frameLen) { s.frameT = 0; s.frame = s.frame ? 0 : 1; }
       s.blink = s.blink > 0 ? s.blink - dt : Math.random() < dt * 0.4 ? 0.14 : 0;
-      render();
-    };
+      s.ear = s.ear > 0 ? s.ear - dt : Math.random() < dt * (s.act === "sleep" ? 0.1 : 0.5) ? 0.15 : 0;
+      s.wave = Math.max(0, s.wave - dt);
+      if (s.hop !== 0) {
+        s.hopV += 900 * dt;
+        s.hop += s.hopV * dt;
+        if (s.hop >= 0) { s.hop = 0; s.hopV = 0; }
+      }
+      if (s.act === "sleep") s.zzT = (s.zzT + dt) % 2;
+      s.moving = false;
+
+      // Eyes follow the cursor when it is close; a lingering cursor gets a wave.
+      const cx = s.x + CW / 2;
+      const cy = s.feet - FEET / 2;
+      const near = pointer.inside && Math.hypot(pointer.x - cx, pointer.y - cy) < 170;
+      if (near && s.act !== "walk" && s.act !== "sleep") {
+        s.lookOff = (pointer.x > cx ? 1 : -1) * s.dir;
+        if (!nearSince) nearSince = now;
+        if (now - nearSince > 1800 && now - lastNearWave > 12_000 && (s.where === "floor" || s.where === "perch")) {
+          lastNearWave = now;
+          s.wave = 1.2;
+          say(pick(["hi there!", "need something?", "hey 👀"]), 1500);
+        }
+      } else {
+        nearSince = 0;
+        if (s.act === "look") {
+          s.lookT += dt;
+          if (s.lookT > 0.7) { s.lookT = 0; s.lookOff = s.lookOff === 1 ? -1 : 1; }
+        } else s.lookOff = 0;
+      }
+
+      if (reduceMotion.matches) {
+        // Stay in the corner, only small in-place moves.
+        s.where = "floor";
+        s.perch = null;
+        s.goal = null;
+        s.x = 24;
+        s.feet = floorY();
+        s.actT -= dt;
+        if (s.act === "walk" || (s.actT <= 0 && s.act !== "sleep")) {
+          const r = Math.random();
+          setAct(r < 0.35 ? "type" : r < 0.6 ? "read" : r < 0.85 ? "look" : "idle", rand(2, 4));
+        }
+      } else {
+        if (s.act !== "sleep" && now - lastActivity > NAP_AFTER_MS && (s.where === "floor" || s.where === "perch")) {
+          setAct("sleep", 99);
+          s.goal = null;
+        }
+        if (s.where === "floor") updateFloor(dt, now);
+        else if (s.where === "perch") updatePerch(dt, now);
+        else if (s.where === "air") updateAir(dt);
+        else if (s.where === "climb") updateClimb(dt);
+        else if (s.where === "drag") {
+          s.x = drag.lx - drag.gx;
+          s.feet = drag.ly - drag.gy + FEET;
+        }
+        // On the floor, a visitor hovering a card also sends Byte over.
+        if (s.where === "floor" && !s.goal && hovered && s.act !== "sleep" && now - hoveredSince > 900 && now - lastGoalAt > 6000) {
+          const r = hovered.getBoundingClientRect();
+          if (usable(r) && climbX(r) > 8) {
+            s.goal = hovered;
+            lastGoalAt = now;
+            say("ooh, that one!", 1300);
+          }
+        }
+      }
+      render(now, dt);
+    }
+
+    // Say hello shortly after the page loads.
+    const helloTimer = setTimeout(() => {
+      s.wave = 1.4;
+      say("hi! I'm Byte", 2200);
+    }, 1200);
 
     let raf = 0;
     let last = performance.now();
     const loop = (now: number) => {
-      step(Math.min(0.05, (now - last) / 1000));
+      const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
+      if (wideEnough.matches) step(dt, now);
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
 
     return () => {
       cancelAnimationFrame(raf);
-      clearTimeout(bubbleTimer);
-      events.forEach((e) => window.removeEventListener(e, onActivity));
+      clearTimeout(helloTimer);
+      window.removeEventListener("pointermove", onPointerMove);
+      document.documentElement.removeEventListener("pointerleave", onPointerLeave);
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("keydown", onActivity);
+      canvas.removeEventListener("pointerdown", onDown);
+      canvas.removeEventListener("pointermove", onMove);
+      canvas.removeEventListener("pointerup", onUp);
+      canvas.removeEventListener("pointercancel", onUp);
     };
   }, [hidden]);
 
   if (hidden) return null;
 
   return (
-    <div
-      ref={rootRef}
-      aria-hidden="true"
-      className="pointer-events-none fixed bottom-4 left-0 z-20 hidden h-[70px] w-full sm:block"
-    >
-      <div
-        ref={bubbleRef}
-        className="absolute left-0 top-0 rounded-md bg-foreground px-2 py-0.5 font-mono text-xs font-bold text-background opacity-0 transition-opacity"
-      >
-        hi!
+    <>
+      {/* Byte moves between these two layers: fixed while on the floor or
+          in the air, and scrolling with the page while standing on a spot. */}
+      <div ref={fixedLayerRef} aria-hidden="true" className="pointer-events-none fixed inset-0 z-20 hidden sm:block">
+        <div ref={ropeRef} className="absolute left-0 top-0 opacity-0" style={{ width: 4, height: 0 }}>
+          <svg
+            className="absolute left-0 top-0"
+            width="16"
+            height="12"
+            viewBox="0 0 8 6"
+            shapeRendering="crispEdges"
+            aria-hidden="true"
+          >
+            <rect x="0" y="0" width="7" height="1" fill={C.hook} />
+            <rect x="6" y="1" width="2" height="1" fill={C.hook} />
+            <rect x="7" y="2" width="1" height="2" fill={C.hook} />
+            <rect x="0" y="1" width="2" height="5" fill={C.hook} />
+          </svg>
+          <div
+            className="absolute bottom-0 left-0 top-3 w-1"
+            style={{ background: "repeating-linear-gradient(to bottom, #a16207 0 5px, #ca8a04 5px 10px)" }}
+          />
+        </div>
+        <div ref={actorRef} className="absolute left-0 top-0" style={{ width: CW, height: CH }}>
+          <div
+            ref={bubbleRef}
+            className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-foreground px-2 py-0.5 font-mono text-xs font-bold text-background opacity-0 shadow-sm transition-opacity"
+            style={{ bottom: CH - (TOP + 1) * PX + 4 }}
+          />
+          <div
+            ref={zzRef}
+            className="absolute font-mono text-sm font-bold text-muted-foreground opacity-0"
+            style={{ left: CW - 16, top: (TOP + 1) * PX }}
+          >
+            z
+          </div>
+          <canvas
+            ref={canvasRef}
+            width={CW}
+            height={CH}
+            className="pointer-events-auto absolute left-0 top-0 cursor-grab touch-none select-none active:cursor-grabbing [image-rendering:pixelated]"
+          />
+        </div>
       </div>
-      <div
-        ref={zzRef}
-        className="absolute left-0 top-0 font-mono text-sm font-bold text-muted-foreground opacity-0"
-      >
-        z
-      </div>
-      <canvas
-        ref={canvasRef}
-        width={W * PX}
-        height={H * PX}
-        onClick={() => sayHiRef.current()}
-        className="pointer-events-auto absolute left-0 top-0 cursor-pointer [image-rendering:pixelated]"
-      />
-    </div>
+      <div ref={absLayerRef} aria-hidden="true" className="pointer-events-none absolute left-0 top-0 z-20 hidden h-0 w-0 sm:block" />
+    </>
   );
 }

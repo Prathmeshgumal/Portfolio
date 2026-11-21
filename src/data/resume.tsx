@@ -133,6 +133,7 @@ export const DATA = {
   projects: [
     {
       title: "Pedit",
+      byteSays: "built in 2 days!",
       href: "https://github.com/Prathmeshgumal/pedit",
       dates: "AI-powered desktop video editor",
       active: true,
@@ -160,6 +161,7 @@ export const DATA = {
     },
     {
       title: "DSA Tutor",
+      byteSays: "21 custom tools!",
       href: "https://github.com/Prathmeshgumal/my-dsa-tutor",
       dates: "Local DSA practice editor with a Claude tutor",
       active: true,
@@ -186,6 +188,7 @@ export const DATA = {
     },
     {
       title: "nib",
+      byteSays: "opens in 20 ms!",
       href: "https://nib-note.vercel.app",
       dates: "Terminal-first Markdown notes",
       active: true,
@@ -209,6 +212,7 @@ export const DATA = {
     },
     {
       title: "Verp",
+      byteSays: "no GPS spoofing here",
       href: "https://github.com/Prathmeshgumal/Verp",
       dates: "GPS-based workforce attendance system",
       active: true,
