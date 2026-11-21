@@ -15,7 +15,6 @@ type Skill = {
 export const DATA = {
   name: "Prathmesh Gumal",
   initials: "PG",
-  // TODO: change this to your real domain once the site is deployed
   url: "https://prathmeshgumal.vercel.app",
   location: "Hyderabad, India",
   locationLink: "https://www.google.com/maps/place/Hyderabad",
