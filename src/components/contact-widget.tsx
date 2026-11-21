@@ -296,6 +296,7 @@ export default function ContactWidget() {
   const [formKey, setFormKey] = useState(0);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const firstFieldRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const close = () => {
     setOpen(false);
@@ -311,8 +312,22 @@ export default function ContactWidget() {
         triggerRef.current?.focus();
       }
     };
+    // Close when the visitor clicks or taps anywhere outside the widget.
+    // Typed text is kept, because the panel stays mounted while closed.
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (!target) return;
+      if (containerRef.current?.contains(target)) return;
+      // Buttons that open the widget handle themselves; don't close-then-reopen.
+      if (target.closest('[aria-controls="contact-widget"]')) return;
+      setOpen(false);
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
   }, [open]);
 
   // Lets other parts of the page (like the "Get in Touch" section) open the widget.
@@ -329,7 +344,10 @@ export default function ContactWidget() {
     : { type: "spring" as const, stiffness: 380, damping: 30 };
 
   return (
-    <div className="fixed bottom-24 right-4 z-40 flex flex-col items-end gap-3 sm:bottom-6 sm:right-6">
+    <div
+      ref={containerRef}
+      className="fixed bottom-24 right-4 z-40 flex flex-col items-end gap-3 sm:bottom-6 sm:right-6"
+    >
       {/* The panel stays mounted while closed, so half-typed text isn't lost. */}
       <motion.section
         id="contact-widget"
