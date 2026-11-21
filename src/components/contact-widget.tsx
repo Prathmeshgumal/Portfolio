@@ -329,7 +329,7 @@ export default function ContactWidget() {
     : { type: "spring" as const, stiffness: 380, damping: 30 };
 
   return (
-    <div className="fixed bottom-24 left-4 z-40 flex flex-col items-start gap-3 sm:bottom-6 sm:left-6">
+    <div className="fixed bottom-24 right-4 z-40 flex flex-col items-end gap-3 sm:bottom-6 sm:right-6">
       {/* The panel stays mounted while closed, so half-typed text isn't lost. */}
       <motion.section
         id="contact-widget"
@@ -344,7 +344,7 @@ export default function ContactWidget() {
             : { opacity: 0, y: 12, scale: 0.94, filter: "blur(4px)" }
         }
         transition={spring}
-        style={{ transformOrigin: "bottom left" }}
+        style={{ transformOrigin: "bottom right" }}
         className={cn(
           "relative w-[min(21rem,calc(100vw-2rem))] overflow-hidden rounded-3xl border bg-card shadow-[0_24px_60px_-12px_rgba(0,0,0,0.25),0_0_0_1px_rgba(0,0,0,0.02)] dark:shadow-[0_24px_60px_-12px_rgba(0,0,0,0.7)]",
           !open && "pointer-events-none"

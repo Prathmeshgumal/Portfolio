@@ -3,8 +3,8 @@ import { withContentCollections } from "@content-collections/next";
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // Keep the dev-only Next.js badge away from the contact widget (bottom-left).
-  devIndicators: { position: "bottom-right" },
+  // Keep the dev-only Next.js badge away from the contact widget (bottom-right).
+  devIndicators: { position: "bottom-left" },
   async headers() {
     return [
       {

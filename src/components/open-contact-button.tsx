@@ -2,7 +2,7 @@
 
 import { openContactWidget } from "@/components/contact-widget";
 
-/** A button that opens the "Get in touch" widget in the bottom-left corner. */
+/** A button that opens the "Get in touch" widget in the bottom-right corner. */
 export default function OpenContactButton({
   children,
   className,
