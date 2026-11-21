@@ -27,6 +27,7 @@ const TOP = 6; // sprite rows start here, leaving headroom for the umbrella
 const CW = COLS * PX;
 const CH = ROWS * PX;
 const FEET = (TOP + 13) * PX; // y inside the canvas where the feet touch the ground
+const HAND_Y = (TOP - 1) * PX; // y inside the canvas where Byte grips the rope
 
 const C = {
   outline: "#3a2418",
@@ -213,6 +214,8 @@ export default function ByteBuddy() {
   const bubbleRef = useRef<HTMLDivElement>(null);
   const zzRef = useRef<HTMLDivElement>(null);
   const ropeRef = useRef<HTMLDivElement>(null);
+  const ropePathRef = useRef<SVGPathElement>(null);
+  const ropeStripeRef = useRef<SVGPathElement>(null);
 
   useEffect(() => {
     if (hidden) return;
@@ -261,7 +264,24 @@ export default function ByteBuddy() {
       bubbleUntil: 0,
     };
     // The rope: thrown up before a climb, pulled up after it.
-    const rope = { mode: "none" as "none" | "throw" | "climb" | "retract", t: 0, anchor: null as HTMLElement | null, startTop: 0 };
+    const rope = {
+      mode: "none" as "none" | "throw" | "climb" | "retract",
+      t: 0,
+      anchor: null as HTMLElement | null,
+      startTop: 0,
+      time: 0, // drives the sway
+      amp: 0, // 0 while the rope is flying up, eases to 1 once it has caught
+      top: 0,
+      length: 0,
+    };
+    const ROPE_BOX = 80; // width of the box the swaying rope is drawn in
+    // How far the rope is pushed sideways at `dy` pixels below the hook:
+    // a slow pendulum swing plus a ripple running down the rope.
+    // Both grow toward the free end, so the hook stays put.
+    const ropeSway = (dy: number) => {
+      const k = rope.length > 0 ? clamp(dy / rope.length, 0, 1) : 0;
+      return rope.amp * k * (14 * Math.sin(rope.time * 1.7) + 5 * Math.sin(rope.time * 6 - dy * 0.045));
+    };
     const saidAt = new WeakMap<Element, number>();
     const flagged = new WeakSet<Element>();
     let lastActivity = performance.now();
@@ -501,7 +521,7 @@ export default function ByteBuddy() {
         if (!s.moving) {
           s.where = "climb";
           s.dir = 1;
-          Object.assign(rope, { mode: "throw", t: 0, anchor: s.goal, startTop: s.feet - FEET + 10 });
+          Object.assign(rope, { mode: "throw", t: 0, anchor: s.goal, startTop: s.feet - FEET + 10, amp: 0, time: 0 });
         }
         return;
       }
@@ -715,6 +735,8 @@ export default function ByteBuddy() {
         return;
       }
       rope.t += dt / (rope.mode === "throw" ? 0.45 : 0.4);
+      rope.time += dt;
+      rope.amp = rope.mode === "throw" ? 0 : Math.min(1, rope.amp + dt * 2);
       const t = Math.min(1, rope.t);
       const bottom = floorY() - 4;
       let top = r.top;
@@ -724,9 +746,20 @@ export default function ByteBuddy() {
         end = bottom + (r.top - bottom) * t;
         if (t >= 1) rope.mode = "none";
       }
+      rope.top = top;
+      rope.length = Math.max(0, end - top);
+      const height = Math.max(0, Math.round(end - top + 8));
       el.style.opacity = "1";
-      el.style.transform = `translate(${Math.round(r.left - ROPE_INSET - 2)}px, ${Math.round(top - 8)}px)`;
-      el.style.height = `${Math.max(0, Math.round(end - top + 8))}px`;
+      el.style.transform = `translate(${Math.round(r.left - ROPE_INSET - ROPE_BOX / 2)}px, ${Math.round(top - 8)}px)`;
+      el.style.height = `${height}px`;
+
+      // Redraw the rope as a curve through points every 8px.
+      const mid = ROPE_BOX / 2;
+      let d = `M ${mid} 8`;
+      for (let y = 8; y <= rope.length; y += 8) d += ` L ${(mid + ropeSway(y)).toFixed(1)} ${y + 8}`;
+      d += ` L ${(mid + ropeSway(rope.length)).toFixed(1)} ${height}`;
+      ropePathRef.current!.setAttribute("d", d);
+      ropeStripeRef.current!.setAttribute("d", d);
     }
 
     function render(now: number, dt: number) {
@@ -740,7 +773,15 @@ export default function ByteBuddy() {
       const top = s.feet - FEET + s.hop + (reduceMotion.matches ? 0 : bob);
       const x = onPerch ? s.x + window.scrollX : s.x;
       const y = onPerch ? top + window.scrollY : top;
-      actor!.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+      let swingX = 0;
+      let tilt = 0;
+      if (s.where === "climb" && rope.mode === "climb") {
+        // Hang from the hands: follow the rope sideways and lean with its slope.
+        const handY = top + HAND_Y - rope.top;
+        swingX = ropeSway(handY);
+        tilt = (Math.atan2(ropeSway(handY + 6) - ropeSway(handY - 6), 12) * 180) / Math.PI;
+      }
+      actor!.style.transform = `translate(${Math.round(x + swingX)}px, ${Math.round(y)}px) rotate(${(-tilt).toFixed(1)}deg)`;
 
       if (now > s.bubbleUntil) bubble!.style.opacity = "0";
       if (pose === "sleep") {
@@ -870,9 +911,21 @@ export default function ByteBuddy() {
       {/* Byte moves between these two layers: fixed while on the floor or
           in the air, and scrolling with the page while standing on a spot. */}
       <div ref={fixedLayerRef} aria-hidden="true" className="pointer-events-none fixed inset-0 z-20 hidden sm:block">
-        <div ref={ropeRef} className="absolute left-0 top-0 opacity-0" style={{ width: 4, height: 0 }}>
+        <div ref={ropeRef} className="absolute left-0 top-0 opacity-0" style={{ width: 80, height: 0 }}>
+          <svg className="absolute inset-0 h-full w-full overflow-visible" aria-hidden="true">
+            <path ref={ropePathRef} fill="none" stroke="#a16207" strokeWidth="4" strokeLinejoin="round" />
+            <path
+              ref={ropeStripeRef}
+              fill="none"
+              stroke="#ca8a04"
+              strokeWidth="4"
+              strokeDasharray="5 5"
+              strokeLinejoin="round"
+            />
+          </svg>
           <svg
-            className="absolute left-0 top-0"
+            className="absolute top-0"
+            style={{ left: 38 }}
             width="16"
             height="12"
             viewBox="0 0 8 6"
@@ -884,12 +937,12 @@ export default function ByteBuddy() {
             <rect x="7" y="2" width="1" height="2" fill={C.hook} />
             <rect x="0" y="1" width="2" height="5" fill={C.hook} />
           </svg>
-          <div
-            className="absolute bottom-0 left-0 top-3 w-1"
-            style={{ background: "repeating-linear-gradient(to bottom, #a16207 0 5px, #ca8a04 5px 10px)" }}
-          />
         </div>
-        <div ref={actorRef} className="absolute left-0 top-0" style={{ width: CW, height: CH }}>
+        <div
+          ref={actorRef}
+          className="absolute left-0 top-0"
+          style={{ width: CW, height: CH, transformOrigin: `${CW / 2}px ${HAND_Y}px` }}
+        >
           <div
             ref={bubbleRef}
             className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-foreground px-2 py-0.5 font-mono text-xs font-bold text-background opacity-0 shadow-sm transition-opacity"
